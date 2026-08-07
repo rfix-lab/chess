@@ -385,3 +385,31 @@ setInterval(() => {
         board[from_position.y][from_position.x] = blank;
     }
 }, delta_time);
+
+function showPromotionSelector(color) {
+    const modal = document.getElementById('promotionModal');
+    if (!modal) return;
+
+    const isWhite = color === 0;
+    const pieces = [
+        { type: 0b0011, symbol: isWhite ? '♕' : '♛' },
+        { type: 0b0100, symbol: isWhite ? '♖' : '♜' },
+        { type: 0b0110, symbol: isWhite ? '♘' : '♞' },
+        { type: 0b0101, symbol: isWhite ? '♗' : '♝' },
+    ];
+
+    const container = document.getElementById('promotionChoices');
+    container.innerHTML = '';
+    pieces.forEach(p => {
+        const btn = document.createElement('button');
+        btn.className = 'promotion-piece';
+        btn.textContent = p.symbol;
+        btn.onclick = () => {
+            socket.emit('promotion:choose', { gameId: match_id, pieceType: p.type });
+            modal.style.display = 'none';
+        };
+        container.appendChild(btn);
+    });
+
+    modal.style.display = 'flex';
+}

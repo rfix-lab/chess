@@ -66,6 +66,16 @@ io.on('connection', socket => {
     let sentBoard = match.boardState.map((arr) => { return arr.slice(); });
     if (valid) {
       chessMakeMove(match, fromCoords, toCoords);
+
+      // If pawn reached promotion square, wait for piece choice
+      if (match.pendingPromotion) {
+        sentBoard = match.boardState.map((arr) => { return arr.slice(); });
+        const promoColor = match.pendingPromotion.color;
+        match.player1Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
+        match.player2Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
+        return;
+      }
+
       sentBoard = match.boardState.map((arr) => { return arr.slice(); });
       sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
       sentBoard[toCoords.y][toCoords.x] |= 0b10000;
@@ -165,6 +175,34 @@ io.on('connection', socket => {
     matches.push(privateMatch);
 
     socket.emit('private-match', privateMatch.matchId);
+  });
+
+  // Handle promotion piece selection
+  socket.on('promotion:choose', (data) => {
+    const match = matches.find(m => m.matchId === data.gameId);
+    if (!match || !match.pendingPromotion) return;
+
+    const { from, to, color } = match.pendingPromotion;
+    const pieceType = data.pieceType;
+
+    match.boardState[to.y][to.x] = color | pieceType;
+    match.pendingPromotion = null;
+    match.turnState = 1 - match.turnState;
+
+    const board = match.boardState.map((arr) => { return arr.slice(); });
+    const opponent = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
+
+    socket.emit('validated', board, match.turnState);
+    if (opponent) opponent.emit('validated', board, match.turnState);
+
+    const endReason = isGameEndReason(match.boardState, match.turnState);
+    if (endReason === 'checkmate') {
+      socket.emit('checkMate', match.turnState);
+      if (opponent) opponent.emit('checkMate', match.turnState);
+    } else if (endReason === 'stalemate') {
+      socket.emit('stalemate');
+      if (opponent) opponent.emit('stalemate');
+    }
   });
 
   // thie route is fired when a socket disconnects

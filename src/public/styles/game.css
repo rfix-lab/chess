@@ -27,3 +27,47 @@
   -webkit-transform-origin:50% 50%;
   -webkit-animation-iteration-count: infinite;
 }
+
+/* Promotion selector modal */
+.promotion-modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.promotion-content {
+    background: #2d2d2d;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    color: #fff;
+}
+.promotion-content h3 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+}
+.promotion-choices {
+    display: flex;
+    gap: 12px;
+}
+.promotion-piece {
+    font-size: 48px;
+    background: #444;
+    border: 2px solid #666;
+    border-radius: 8px;
+    width: 80px;
+    height: 80px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.promotion-piece:hover {
+    background: #555;
+    border-color: #888;
+    transform: scale(1.1);
+}

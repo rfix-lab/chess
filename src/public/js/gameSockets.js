@@ -103,7 +103,11 @@ socket.on('gameNotFound', () => {
 });
 
 // return from server on whether a move was validated or not
-socket.on('validated', (boardState, turnState) => {
+socket.on('validated', (boardState, turnState, extra) => {
+  // Handle pending promotion — show selector before updating board
+  if (extra && extra.pendingPromotion) {
+    showPromotionSelector(extra.promotionColor);
+  }
   let changedSquares = 2;
   // for(let i = 0; i < noOfSquares; i++){
   //   for(let j = 0; j < noOfSquares; j++){

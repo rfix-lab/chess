@@ -103,11 +103,15 @@ export function chessMakeMove(match, fromCoords, toCoords) {
         }
     }
 
-    // Auto-promote pawn to queen on reaching last rank
+    // Pawn promotion: mark pending, don't change turn yet
     if (isWhitePawn && toCoords.y == 7) {
-        match.boardState[toCoords.y][toCoords.x] = white | queen;
-    } else if (isBlackPawn && toCoords.y == 0) {
-        match.boardState[toCoords.y][toCoords.x] = black | queen;
+        match.pendingPromotion = { from: fromCoords, to: toCoords, color: white };
+        return;
+    }
+
+    if (isBlackPawn && toCoords.y == 0) {
+        match.pendingPromotion = { from: fromCoords, to: toCoords, color: black };
+        return;
     }
 
     match.turnState = 1 - match.turnState;
