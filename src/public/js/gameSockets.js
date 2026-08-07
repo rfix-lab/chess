@@ -178,3 +178,10 @@ socket.on('checkMate', turn => {
   else
     document.getElementById('status').innerText = 'Check Mate you Won! 🎉';
 });
+
+// stalemate (draw)
+socket.on('stalemate', () => {
+  can_move = false;
+  clearSession();
+  document.getElementById('status').innerText = 'Stalemate — Draw! 🤝';
+});

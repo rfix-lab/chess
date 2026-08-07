@@ -7,7 +7,7 @@ import path from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { chessMakeMove, checkLegalMove, checkMateCheck } from './lib/chessutils.js';
+import { chessMakeMove, checkLegalMove, isGameEndReason } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
 import { authenticateUser, signupUser } from './lib/auth.js';
 
@@ -75,9 +75,13 @@ io.on('connection', socket => {
     match.player2Socket.emit('validated', sentBoard, match.turnState);
 
     // check if game over
-    if(checkMateCheck(match.boardState, match.turnState)){
+    const endReason = isGameEndReason(match.boardState, match.turnState);
+    if (endReason === 'checkmate') {
       match.player1Socket.emit('checkMate', match.turnState);
       match.player2Socket.emit('checkMate', match.turnState);
+    } else if (endReason === 'stalemate') {
+      match.player1Socket.emit('stalemate');
+      match.player2Socket.emit('stalemate');
     }
   });
 
@@ -115,8 +119,9 @@ io.on('connection', socket => {
       return;
     }
 
-    // Game already finished — check if board has checkmate for current turn
-    if (checkMateCheck(match.boardState, match.turnState)) {
+    // Game already finished — check if board has checkmate/stalemate for current turn
+    const endReason = isGameEndReason(match.boardState, match.turnState);
+    if (endReason) {
       socket.emit('gameNotFound');
       return;
     }
