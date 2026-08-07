@@ -53,29 +53,31 @@ app.get('/game', (req, res) => {
 io.on('connection', socket => {
   // this route validates a move sent by a player
   socket.on('move', (matchId, fromCoords, toCoords) => {
+    const match = matches[matchId];
+    if (!match || !match.player1Socket || !match.player2Socket) return;
 
     // authenticating move
     let valid = checkLegalMove(
-      matches[matchId].boardState,
+      match.boardState,
       fromCoords, toCoords,
-      matches[matchId].turnState
+      match.turnState
     );
 
-    let sentBoard = matches[matchId].boardState.map((arr) => { return arr.slice(); });
+    let sentBoard = match.boardState.map((arr) => { return arr.slice(); });
     if (valid) {
-      chessMakeMove(matches[matchId], fromCoords, toCoords);
-      sentBoard = matches[matchId].boardState.map((arr) => { return arr.slice(); });
+      chessMakeMove(match, fromCoords, toCoords);
+      sentBoard = match.boardState.map((arr) => { return arr.slice(); });
       sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
       sentBoard[toCoords.y][toCoords.x] |= 0b10000;
     }
 
-    matches[matchId].player1Socket.emit('validated', sentBoard, matches[matchId].turnState);
-    matches[matchId].player2Socket.emit('validated', sentBoard, matches[matchId].turnState);
+    match.player1Socket.emit('validated', sentBoard, match.turnState);
+    match.player2Socket.emit('validated', sentBoard, match.turnState);
 
     // check if game over
-    if(checkMateCheck(matches[matchId].boardState, matches[matchId].turnState)){
-      matches[matchId].player1Socket.emit('checkMate', matches[matchId].turnState);
-      matches[matchId].player2Socket.emit('checkMate', matches[matchId].turnState);
+    if(checkMateCheck(match.boardState, match.turnState)){
+      match.player1Socket.emit('checkMate', match.turnState);
+      match.player2Socket.emit('checkMate', match.turnState);
     }
   });
 
@@ -103,6 +105,43 @@ io.on('connection', socket => {
     }
     // use sessionID to identify the user
     // if sessionID is undefined, then the user plays as a guest
+  });
+
+  // reconnect: player reloads page and wants to rejoin their game with the same color
+  socket.on('reconnect', ({ gameId, color, sessionID }) => {
+    const match = matches.find(m => m.matchId === gameId);
+    if (!match) {
+      socket.emit('gameNotFound');
+      return;
+    }
+
+    // Game already finished — check if board has checkmate for current turn
+    if (checkMateCheck(match.boardState, match.turnState)) {
+      socket.emit('gameNotFound');
+      return;
+    }
+
+    const playerSocket = color === 0 ? match.player1Socket : match.player2Socket;
+
+    // If current socket is the same (reconnect to self), that's fine
+    // If someone else has this socket slot already → reject (double connect)
+    if (playerSocket && playerSocket !== socket) {
+      // Another socket already occupies this color slot — reject
+      socket.emit('gameNotFound');
+      return;
+    }
+
+    // Replace the socket (old one disconnected or same)
+    if (color === 0) {
+      match.player1Socket = socket;
+    } else {
+      match.player2Socket = socket;
+    }
+
+    // Deep-copy board state to avoid move indicator bits
+    const cleanBoard = match.boardState.map((arr) => arr.slice().map((v) => v & 0b01111));
+
+    socket.emit('reconnected', color, gameId, cleanBoard, match.turnState);
   });
 
   // this route generates a private match on demand
