@@ -60,7 +60,7 @@ function colorToTurn(color) {
 }
 
 
-function chessMoveValidate(board, moveFromCoord, moveToCoord, turn) {
+function chessMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
     // check if the board is of right size,
     // this shouldn't be wrong as it is not user controlled
     // assert.equal(board.length, noOfSquares);
@@ -113,7 +113,7 @@ function chessMoveValidate(board, moveFromCoord, moveToCoord, turn) {
             moveFromCoord, moveToCoord, turn);
             break;
         case king: valid = valid && kingMoveValidate(board,
-            moveFromCoord, moveToCoord, turn);
+            moveFromCoord, moveToCoord, turn, match);
             break;
         default: valid = false;
             // console.log("ChessError: not a piece");
@@ -152,8 +152,16 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
     return false;
 }
 
-function checkLegalMove(board, moveFromCoord, moveToCoord, turn){
-    return chessMoveValidate(board, moveFromCoord, moveToCoord, turn)
+function checkLegalMove(board, moveFromCoord, moveToCoord, turnOrMatch){
+    let turn, match;
+    if (typeof turnOrMatch === 'object' && turnOrMatch !== null && 'castlingRights' in turnOrMatch) {
+      match = turnOrMatch;
+      turn = match.turnState;
+    } else {
+      turn = turnOrMatch;
+      match = null;
+    }
+    return chessMoveValidate(board, moveFromCoord, moveToCoord, turn, match)
         && !checkCheck(board, moveFromCoord, moveToCoord, turn)
 }
 
@@ -371,8 +379,43 @@ function queenMoveValidate(board, moveFromCoord, moveToCoord, turn) {
         || rookMoveValidate(board, moveFromCoord, moveToCoord, turn);
 }
 
-function kingMoveValidate(board, moveFromCoord, moveToCoord, turn) {
+function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
     let destValue = board[moveToCoord.y][moveToCoord.x];
+
+    // Castling: king moves 2 squares horizontally on the same row
+    if (Math.abs(moveToCoord.x - moveFromCoord.x) === 2 && moveToCoord.y === moveFromCoord.y && match) {
+        const kingRow = turn === whiteTurn ? 0 : 7;
+        if (moveFromCoord.y !== kingRow || moveFromCoord.x !== 4) return false;
+        if (isKingInCheck(board, turn)) return false;
+
+        const rights = match.castlingRights;
+        const dx = moveToCoord.x - moveFromCoord.x;
+        if (turn === whiteTurn) {
+            if (dx === 2 && !rights.whiteKingSide) return false;
+            if (dx === -2 && !rights.whiteQueenSide) return false;
+        } else {
+            if (dx === 2 && !rights.blackKingSide) return false;
+            if (dx === -2 && !rights.blackQueenSide) return false;
+        }
+
+        // Path must be clear
+        if (dx === 2) {
+            if (board[kingRow][6] !== blank || board[kingRow][7] !== blank) return false;
+            if ((board[kingRow][7] & 0b0111) !== rook) return false;
+        } else {
+            if (board[kingRow][1] !== blank || board[kingRow][2] !== blank || board[kingRow][3] !== blank) return false;
+            if ((board[kingRow][0] & 0b0111) !== rook) return false;
+        }
+
+        // King must not pass through check (simulate intermediate position)
+        const simBoard = board.map(r => [...r]);
+        simBoard[moveFromCoord.y][moveFromCoord.x] = blank;
+        const midX = moveFromCoord.x + (dx > 0 ? 1 : -1);
+        simBoard[moveFromCoord.y][midX] = board[moveFromCoord.y][moveFromCoord.x];
+        if (isKingInCheck(simBoard, turn)) return false;
+
+        return true;
+    }
 
     // cannot capture own pieces
     if (getColor(destValue) == turnToColor(turn))

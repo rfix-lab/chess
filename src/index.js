@@ -60,7 +60,7 @@ io.on('connection', socket => {
     let valid = checkLegalMove(
       match.boardState,
       fromCoords, toCoords,
-      match.turnState
+      match
     );
 
     let sentBoard = match.boardState.map((arr) => { return arr.slice(); });

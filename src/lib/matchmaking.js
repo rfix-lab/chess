@@ -30,6 +30,12 @@ export function initMatch(id, playerSocket) {
       return arr.slice();
     }),
     turnState: 0,
+    castlingRights: {
+      whiteKingSide: true,
+      whiteQueenSide: true,
+      blackKingSide: true,
+      blackQueenSide: true
+    },
     private: false
   }
 }
