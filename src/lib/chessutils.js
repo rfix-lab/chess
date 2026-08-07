@@ -60,8 +60,20 @@ function colorToTurn(color) {
 }
 
 export function chessMakeMove(match, fromCoords, toCoords) {
-    match.boardState[toCoords.y][toCoords.x] = match.boardState[fromCoords.y][fromCoords.x];
+    let piece = match.boardState[fromCoords.y][fromCoords.x];
+    let isWhitePawn = (getPiece(piece) == pawn && getColor(piece) == white);
+    let isBlackPawn = (getPiece(piece) == pawn && getColor(piece) == black);
+
+    match.boardState[toCoords.y][toCoords.x] = piece;
     match.boardState[fromCoords.y][fromCoords.x] = 0;
+
+    // Auto-promote pawn to queen on reaching last rank
+    if (isWhitePawn && toCoords.y == 7) {
+        match.boardState[toCoords.y][toCoords.x] = white | queen;
+    } else if (isBlackPawn && toCoords.y == 0) {
+        match.boardState[toCoords.y][toCoords.x] = black | queen;
+    }
+
     match.turnState = 1 - match.turnState;
 };
 
@@ -148,13 +160,9 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
             }
         }
     }
-    console.log(kingPos);
     let moves = genAllMoves(newBoard, (black - currColor));
-    console.log(moves);
     for (let m of moves){
-        // console.log("Move to: ", m.to);
         if(coordEqual(m.to, kingPos)){
-            console.log("king in danger");
             return true;
         }
     }
@@ -458,12 +466,42 @@ function genAllLegalMoves(board, color){
     return moves;
 }
 
+// Check if the king is currently in check on the given board for the given turn
+function isKingInCheck(board, turn) {
+    let currColor = turnToColor(turn);
+    let kingPos = Coord(0, 0);
+    for (let i = 0; i < noOfSquares; i++) {
+        for (let j = 0; j < noOfSquares; j++) {
+            if (board[j][i] == (king | currColor)) {
+                kingPos.x = i;
+                kingPos.y = j;
+                break;
+            }
+        }
+    }
+    let enemyColor = black - currColor;
+    let moves = genAllMoves(board, enemyColor);
+    for (let m of moves) {
+        if (coordEqual(m.to, kingPos)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Returns 'checkmate', 'stalemate', or null (game continues)
+export function isGameEndReason(board, turn) {
+    let color = turnToColor(turn);
+    let legal = genAllLegalMoves(board, color);
+    if (legal.length > 0) return null;
+
+    if (isKingInCheck(board, turn)) return 'checkmate';
+    return 'stalemate';
+}
+
 // no more legal moves for whose turn it is 
 export function checkMateCheck(board, turn){
-    let color = turnToColor(turn);
-    if(genAllLegalMoves(board, color).length == 0)
-        return true;
-    return false;
+    return isGameEndReason(board, turn) == 'checkmate';
 }
 
 
