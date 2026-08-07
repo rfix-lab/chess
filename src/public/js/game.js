@@ -166,18 +166,27 @@ function draw() {
     ctx.fillStyle = 'black'
     for (let i = 0; i < no_of_squares; i++) {
         ctx.font = '15px sans-serif';
-        ctx.fillText(8 - i, offset_x / 3,
-            offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
-        // numbered from bottom up  
+        if (my_color == 0) {
+            ctx.fillText(8 - i, offset_x / 3,
+                offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
+        } else {
+            ctx.fillText(1 + i, offset_x / 3,
+                offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
+        }
     }
 
     // write the letters (a - h files)
     for (let i = 0; i < no_of_squares; i++) {
         ctx.font = '15px sans-serif';
-        ctx.fillText(String.fromCharCode(i + 97),
-            offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
-            offset_y * 1.1 + side_len + 10);
-        // ctx.fillText(String.fromCharCode(i), i, offset_y + side_len + 10)
+        if (my_color == 0) {
+            ctx.fillText(String.fromCharCode(97 + i),
+                offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
+                offset_y * 1.1 + side_len + 10);
+        } else {
+            ctx.fillText(String.fromCharCode(104 - i),
+                offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
+                offset_y * 1.1 + side_len + 10);
+        }
     }
 }
 

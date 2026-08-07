@@ -59,18 +59,12 @@ socket.on('startGame', (color, gameId) => {
   }
   else {
     document.getElementById('status').innerText = 'Playing as black';
-    for (let i = 0; i < no_of_squares; i++) {
-      for (let j = i; j < no_of_squares; j++) {
-        let temp = board[i][j];
-        board[i][j] = board[no_of_squares - i - 1][no_of_squares - j - 1];
-        board[no_of_squares - i - 1][no_of_squares - j - 1] = temp;
-      }
+    // Black sees rotated board (180°)
+    let rotated = [];
+    for (let i = 7; i >= 0; i--) {
+      rotated.push(board[i].slice().reverse());
     }
-    for (let i = 0; i < no_of_squares / 2; i++) {
-      let temp = board[i][i];
-      board[i][i] = board[no_of_squares - i - 1][no_of_squares - i - 1];
-      board[no_of_squares - i - 1][no_of_squares - i - 1] = temp;
-    }
+    board = rotated;
   }
 });
 
@@ -85,13 +79,12 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
   if (color == 0) {
     board = boardState;
   } else {
-    // Black sees rotated board
-    for (let i = 0; i < no_of_squares; i++) {
-      board[i] = [];
-      for (let j = 0; j < no_of_squares; j++) {
-        board[i][j] = boardState[no_of_squares - i - 1][no_of_squares - j - 1];
-      }
+    // Black sees rotated board (180°)
+    let rotated = [];
+    for (let i = 7; i >= 0; i--) {
+      rotated.push(boardState[i].slice().reverse());
     }
+    board = rotated;
   }
 
   if (turnState == my_color) {
