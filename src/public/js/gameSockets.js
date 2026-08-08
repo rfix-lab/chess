@@ -402,6 +402,74 @@ socket.on('draw', (data) => {
   document.getElementById('status').innerText = reasons[data.reason] || 'Ничья! 🤝';
 });
 
+// Takeback button
+const btnTakeback = document.getElementById('btn-takeback');
+let takebackDeclined = false;
+if (btnTakeback) {
+  btnTakeback.addEventListener('click', () => {
+    if (gameIsOver || takebackDeclined) return;
+    socket.emit('takebackRequest', match_id);
+    showToast('Takeback request sent');
+  });
+}
+
+// Incoming takeback offer from opponent
+socket.on('takebackOfferReceived', (data) => {
+  if (gameIsOver) return;
+  const modal = document.getElementById('takebackOfferModal');
+  if (modal) modal.style.display = 'flex';
+});
+
+// Takeback: Accept
+const btnTakebackAccept = document.getElementById('btn-takeback-accept');
+if (btnTakebackAccept) {
+  btnTakebackAccept.addEventListener('click', () => {
+    document.getElementById('takebackOfferModal').style.display = 'none';
+    socket.emit('takebackResponse', match_id, true);
+  });
+}
+
+// Takeback: Decline
+const btnTakebackDecline = document.getElementById('btn-takeback-decline');
+if (btnTakebackDecline) {
+  btnTakebackDecline.addEventListener('click', () => {
+    document.getElementById('takebackOfferModal').style.display = 'none';
+    socket.emit('takebackResponse', match_id, false);
+  });
+}
+
+// Takeback accepted by opponent → restore board
+socket.on('takebackAccepted', (boardState, turnState) => {
+  if (my_color == 0) {
+    board = boardState;
+  } else {
+    for (let i = 0; i < no_of_squares; i++) {
+      for (let j = 0; j < no_of_squares; j++) {
+        board[i][j] = boardState[no_of_squares - i - 1][no_of_squares - j - 1];
+      }
+    }
+  }
+  if (turnState == my_color) {
+    document.getElementById('status').innerText = 'Your turn';
+    can_move = true;
+  } else {
+    document.getElementById('status').innerText = 'Opponent\'s turn';
+    can_move = false;
+  }
+});
+
+// Takeback declined by opponent
+socket.on('takebackDeclined', () => {
+  takebackDeclined = true;
+  document.getElementById('btn-takeback').disabled = true;
+  showToast('Takeback declined');
+});
+
+// Takeback error
+socket.on('takebackError', (msg) => {
+  showToast(msg);
+});
+
 // repetition warning
 socket.on('repetitionWarning', (data) => {
   document.getElementById('repetitionWarningText').innerText = data.patternDescription;
