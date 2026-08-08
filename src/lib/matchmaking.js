@@ -42,7 +42,8 @@ export function initMatch(id, playerSocket) {
     private: false,
     gameEnded: false,
     drawOffered: null,
-    challengeFrom: null
+    challengeFrom: null,
+    takebackOffered: null
   }
 }
 

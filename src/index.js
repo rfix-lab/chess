@@ -56,6 +56,17 @@ io.on('connection', socket => {
     const match = matches[matchId];
     if (!match || !match.player1Socket || !match.player2Socket) return;
 
+    // Save state snapshot before move for takeback
+    const snapshot = {
+      board: match.boardState.map(arr => arr.slice()),
+      turnState: match.turnState,
+      castlingRights: Object.assign({}, match.castlingRights),
+      lastMove: match.lastMove,
+      halfMoveClock: match.halfMoveClock,
+      pendingPromotion: match.pendingPromotion
+    };
+    match.stateHistory.push(snapshot);
+
     // authenticating move
     let valid = checkLegalMove(
       match.boardState,
@@ -407,6 +418,69 @@ io.on('connection', socket => {
       const challengerColor = match.player1Socket.id !== socket.id ? 0 : 1;
       const challenger = match.player1Socket.id === challengerColor ? match.player1Socket : match.player2Socket;
       if (challenger) challenger.emit('challengeDeclined', {});
+    }
+  });
+
+  // Takeback request
+  socket.on('takebackRequest', (matchId) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || match.gameEnded) return;
+    if (match.stateHistory.length === 0) return;
+
+    // Only the player whose turn it is can request takeback
+    const requesterColor = match.player1Socket.id === socket.id ? 0 : 1;
+    if (requesterColor !== match.turnState) {
+      socket.emit('takebackError', 'Not your turn to request takeback');
+      return;
+    }
+
+    // Check if already declined once
+    if (match.takebackOffered === 'declined') {
+      socket.emit('takebackError', 'Takeback already declined');
+      return;
+    }
+
+    match.takebackOffered = 'pending';
+
+    const opponent = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
+    if (opponent) {
+      opponent.emit('takebackOfferReceived', { from: requesterColor });
+    }
+  });
+
+  // Takeback response (accept or decline)
+  socket.on('takebackResponse', (matchId, accepted) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || !match.takebackOffered || match.takebackOffered === 'declined') return;
+
+    if (accepted) {
+      // Restore previous state
+      const prev = match.stateHistory.pop();
+      if (prev) {
+        match.boardState = prev.board;
+        match.turnState = prev.turnState;
+        match.castlingRights = prev.castlingRights;
+        match.lastMove = prev.lastMove;
+        match.halfMoveClock = prev.halfMoveClock;
+        match.pendingPromotion = prev.pendingPromotion;
+
+        // Also pop moveHistory entry
+        if (match.moveHistory.length > 0) {
+          match.moveHistory.pop();
+        }
+
+        // Send updated board to both players
+        const cleanBoard = match.boardState.map(arr => arr.slice());
+        match.player1Socket.emit('takebackAccepted', cleanBoard, match.turnState);
+        match.player2Socket.emit('takebackAccepted', cleanBoard, match.turnState);
+      }
+      match.takebackOffered = null;
+    } else {
+      match.takebackOffered = 'declined';
+      // Notify the requester
+      const requesterColor = match.player1Socket.id !== socket.id ? 0 : 1;
+      const requester = match.player1Socket.id === requesterColor ? match.player1Socket : match.player2Socket;
+      if (requester) requester.emit('takebackDeclined', {});
     }
   });
 
