@@ -308,7 +308,6 @@ function display_possible_moves(){
         new_from_position.x = no_of_squares - new_from_position.x - 1;
         new_from_position.y = no_of_squares - new_from_position.y - 1;
     }
-    console.log(new_board)
 
     // Get all the legal moves from the current held piece
     let moves = genLegalMoves(new_board, new_from_position);
@@ -316,7 +315,6 @@ function display_possible_moves(){
 
     // For every legal move draw a green circle indicating that
     for(let m of moves){
-        console.log(m);
         ctx.fillStyle = possible_move_color;
         ctx.font = '15px sans-serif';
         let off_x = offset_x + (side_len_square) / 3;

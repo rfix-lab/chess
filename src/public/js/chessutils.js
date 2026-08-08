@@ -139,13 +139,10 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
             }
         }
     }
-    console.log(kingPos);
     let moves = genAllMoves(newBoard, (black - currColor));
-    console.log(moves);
     for (let m of moves){
         // console.log("Move to: ", m.to);
         if(coordEqual(m.to, kingPos)){
-            console.log("king in danger");
             return true;
         }
     }
