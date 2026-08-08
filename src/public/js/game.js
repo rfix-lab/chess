@@ -166,18 +166,21 @@ function fen_to_board(fen) {
 // Draws the pieces and pawns
 function render_board() {
     let side_len_square = side_len / no_of_squares;
-    ctx.font = Math.floor(side_len_square) * 0.7 + 'px sans serif';
-    let off_x = offset_x + (side_len_square) / 5;
-    let off_y = offset_y * 2 + (side_len_square) / 5;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = Math.floor(side_len_square * 0.75) + 'px sans-serif';
     for (let i = 0; i < no_of_squares; i++) {
         for (let j = 0; j < no_of_squares; j++) {
             ctx.fillStyle = 'black';
-            ctx.fillText(sprites[board[i][j] & (0b1111)],
-                off_x + j * side_len_square,
-                off_y + i * side_len_square);
+            ctx.fillText(
+                sprites[board[i][j] & (0b1111)],
+                offset_x + j * side_len_square + side_len_square / 2,
+                offset_y + i * side_len_square + side_len_square / 2
+            );
         }
     }
-
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
 }
 
 
