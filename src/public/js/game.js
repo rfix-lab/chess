@@ -72,7 +72,16 @@ let new_piece; // value of the piece being dragged to the square
 let is_being_validated = false;
 let can_move = false; // to disable dragging when it's not your turn
 let my_color = null;  // white or black
-let match_id = null;  
+let match_id = null;
+
+// Click-to-move state
+let selectedSquare = null;        // {x, y} in visual coords or null
+let lastMouseDownPx = null;       // {x, y} pixel coords for click vs drag detection
+let isDragging = false;           // true if mouse moved significantly after mousedown
+let legalMoveSquares = new Set(); // "x,y" keys of legal move targets (visual coords)
+const CLICK_THRESHOLD = 5;        // pixels — if mouse moved less, treat as click
+const selected_square_color = '#4a90d9';
+const selected_square_opacity = 0.5;
 
 let sprites = [];
 sprites[blank] = ' ';
@@ -195,6 +204,21 @@ function draw() {
             ctx.fillRect(offset_x + i * side_len_square,
                 offset_y + j * side_len_square,
                 side_len_square, side_len_square);
+
+            // Click-to-move: selected square highlight
+            if (selectedSquare && i === selectedSquare.x && j === selectedSquare.y) {
+                ctx.globalAlpha = selected_square_opacity;
+                ctx.fillStyle = selected_square_color;
+                ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
+                ctx.globalAlpha = 1.0;
+            }
+            // Click-to-move: legal move indicators
+            if (legalMoveSquares.has(i + ',' + j)) {
+                ctx.globalAlpha = 0.3;
+                ctx.fillStyle = possible_move_color;
+                ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
+                ctx.globalAlpha = 1.0;
+            }
         }
     }
     // Display the rank and file numbers and letters
@@ -233,8 +257,66 @@ function get_box_coords() {
     let side_len_square = side_len / no_of_squares;
     let j = Math.floor(x / side_len_square);
     let i = Math.floor(y / side_len_square);
-    // console.log(i, j);
     return [i, j];
+}
+
+function getVisualPieceColor(value) {
+    if ((value & 0b1111) === blank) return -1;
+    return (value & black) ? 1 : 0;
+}
+
+function selectPiece(x, y) {
+    let piece = board[y][x];
+    if ((piece & 0b1111) === blank) return false;
+    if (getVisualPieceColor(piece) !== my_color) return false;
+    selectedSquare = {x: x, y: y};
+    legalMoveSquares.clear();
+    let visualBoard = board;
+    let pos = Coord(x, y);
+    let moves = genLegalMoves(visualBoard, pos);
+    for (let m of moves) {
+        legalMoveSquares.add(m.to.x + ',' + m.to.y);
+    }
+    return true;
+}
+
+function clearSelection() {
+    selectedSquare = null;
+    legalMoveSquares.clear();
+}
+
+function sendMoveToServer(fromX, fromY, toX, toY) {
+    if (my_color == 0) {
+        socket.emit('move', match_id, {x: fromX, y: fromY}, {x: toX, y: toY});
+    } else {
+        socket.emit('move', match_id, {
+                x: no_of_squares - fromX - 1,
+                y: no_of_squares - fromY - 1
+            }, {
+                x: no_of_squares - toX - 1,
+                y: no_of_squares - toY - 1
+            });
+    }
+    is_being_validated = true;
+}
+
+function executeClickToMove(clickX, clickY) {
+    if (selectedSquare === null) {
+        selectPiece(clickX, clickY);
+    } else {
+        let key = clickX + ',' + clickY;
+        if (legalMoveSquares.has(key)) {
+            sendMoveToServer(selectedSquare.x, selectedSquare.y, clickX, clickY);
+            clearSelection();
+        } else {
+            let piece = board[clickY][clickX];
+            if ((piece & 0b1111) !== blank && getVisualPieceColor(piece) === my_color) {
+                selectPiece(clickX, clickY);
+            } else {
+                clearSelection();
+            }
+        }
+    }
 }
 
 // The most complicated function ever
@@ -383,15 +465,30 @@ window.onload = () => {
     render_board();
 }
 
-canvas.onmousedown = () => {
-    // console.log('down');
+canvas.onmousedown = (e) => {
     is_mouse_down = true;
-    // console.log(mouse_x, mouse_y);
+    const rect = canvas.getBoundingClientRect();
+    lastMouseDownPx = {x: e.clientX - rect.left, y: e.clientY - rect.top};
+    isDragging = false;
+    mouse_x = lastMouseDownPx.x;
+    mouse_y = lastMouseDownPx.y;
 }
-canvas.onmouseup = () => {
-    // console.log('up');
+canvas.onmouseup = (e) => {
     is_mouse_down = false;
-    // console.log(mouse_x, mouse_y);
+    if (!isDragging && lastMouseDownPx && can_move) {
+        const rect = canvas.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        let coords = get_box_coords();
+        let i = coords[0], j = coords[1];
+        if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
+            executeClickToMove(j, i);
+        }
+    }
+    if (isDragging) {
+        clearSelection();
+    }
+    lastMouseDownPx = null;
 }
 
 canvas.ontouchstart = (e) => {
@@ -400,15 +497,36 @@ canvas.ontouchstart = (e) => {
     const touch = e.touches[0];
     mouse_x = touch.clientX - rect.left;
     mouse_y = touch.clientY - rect.top;
+    lastMouseDownPx = {x: mouse_x, y: mouse_y};
+    isDragging = false;
 };
 canvas.ontouchend = (e) => {
     is_mouse_down = false;
+    if (!isDragging && lastMouseDownPx && can_move) {
+        let coords = get_box_coords();
+        let i = coords[0], j = coords[1];
+        if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
+            executeClickToMove(j, i);
+        }
+    }
+    if (isDragging) {
+        clearSelection();
+    }
+    lastMouseDownPx = null;
 };
 
 
 canvas.onmousemove = (event) => {
-    mouse_x = event.clientX - document.getElementById('cnv').getBoundingClientRect().x;
-    mouse_y = event.clientY - document.getElementById('cnv').getBoundingClientRect().y;
+    const rect = canvas.getBoundingClientRect();
+    mouse_x = event.clientX - rect.left;
+    mouse_y = event.clientY - rect.top;
+    if (is_mouse_down && lastMouseDownPx && !isDragging) {
+        let dx = mouse_x - lastMouseDownPx.x;
+        let dy = mouse_y - lastMouseDownPx.y;
+        if (Math.sqrt(dx * dx + dy * dy) > CLICK_THRESHOLD) {
+            isDragging = true;
+        }
+    }
 }
 canvas.ontouchmove = (e) => {
     e.preventDefault();
@@ -416,6 +534,13 @@ canvas.ontouchmove = (e) => {
     const touch = e.touches[0];
     mouse_x = touch.clientX - rect.left;
     mouse_y = touch.clientY - rect.top;
+    if (is_mouse_down && lastMouseDownPx && !isDragging) {
+        let dx = mouse_x - lastMouseDownPx.x;
+        let dy = mouse_y - lastMouseDownPx.y;
+        if (Math.sqrt(dx * dx + dy * dy) > CLICK_THRESHOLD) {
+            isDragging = true;
+        }
+    }
 };
 
 function renderCapturedPieces() {
