@@ -346,6 +346,9 @@ socket.on('validated', (boardState, turnState, extra) => {
     }
   }
   is_being_validated = false;
+  // Clear click-to-move selection after server response
+  selectedSquare = null;
+  legalMoveSquares.clear();
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';
     can_move = true;
@@ -361,6 +364,8 @@ socket.on('validated', (boardState, turnState, extra) => {
 socket.on('checkMate', turn => {
   can_move = false;
   gameIsOver = true;
+  selectedSquare = null;
+  legalMoveSquares.clear();
   clearSession();
   disableAllGameActions();
   if(my_color == turnToColor(turn)){
