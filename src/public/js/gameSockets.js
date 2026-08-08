@@ -68,6 +68,10 @@ socket.on('startGame', (color, gameId) => {
     }
     board = rotated;
   }
+  // Show game action buttons
+  const actionsPanel = document.getElementById('game-actions');
+  if (actionsPanel) actionsPanel.style.display = 'flex';
+  resetGameActionButtons();
 });
 
 // Server confirms reconnect — restores board state
@@ -91,6 +95,11 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
     board = rotated;
   }
 
+  // Show action buttons
+  const actionsPanel = document.getElementById('game-actions');
+  if (actionsPanel) actionsPanel.style.display = 'flex';
+  resetGameActionButtons();
+
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';
     can_move = true;
@@ -104,6 +113,178 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
 socket.on('gameNotFound', () => {
   clearSession();
   window.location.href = '/index';
+});
+
+// ============================
+// Draw / Resign / Challenge
+// ============================
+
+let drawOfferDeclined = false;
+let challengeDeclined = false;
+let gameIsOver = false;
+
+function resetGameActionButtons() {
+  drawOfferDeclined = false;
+  challengeDeclined = false;
+  gameIsOver = false;
+}
+
+function disableAllGameActions() {
+  const btns = document.querySelectorAll('.game-btn');
+  btns.forEach(b => b.disabled = true);
+}
+
+function showToast(message) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+// --- Resign button ---
+const btnResign = document.getElementById('btn-resign');
+if (btnResign) {
+  btnResign.addEventListener('click', () => {
+    if (gameIsOver) return;
+    const modal = document.getElementById('resignModal');
+    if (modal) modal.style.display = 'flex';
+  });
+}
+
+const btnResignCancel = document.getElementById('btn-resign-cancel');
+if (btnResignCancel) {
+  btnResignCancel.addEventListener('click', () => {
+    document.getElementById('resignModal').style.display = 'none';
+  });
+}
+
+const btnResignConfirm = document.getElementById('btn-resign-confirm');
+if (btnResignConfirm) {
+  btnResignConfirm.addEventListener('click', () => {
+    document.getElementById('resignModal').style.display = 'none';
+    socket.emit('resign', match_id);
+    gameIsOver = true;
+    can_move = false;
+    disableAllGameActions();
+  });
+}
+
+// --- Offer Draw button ---
+const btnOfferDraw = document.getElementById('btn-offer-draw');
+if (btnOfferDraw) {
+  btnOfferDraw.addEventListener('click', () => {
+    if (gameIsOver || drawOfferDeclined) return;
+    socket.emit('drawOffer', match_id);
+    btnOfferDraw.disabled = true;
+    showToast('Draw offer sent');
+  });
+}
+
+// --- Challenge button ---
+const btnChallenge = document.getElementById('btn-challenge');
+if (btnChallenge) {
+  btnChallenge.addEventListener('click', () => {
+    if (gameIsOver || challengeDeclined) return;
+    socket.emit('challenge', match_id);
+    btnChallenge.disabled = true;
+    showToast('Challenge sent');
+  });
+}
+
+// --- Incoming: Draw offer from opponent ---
+socket.on('drawOfferReceived', (data) => {
+  if (gameIsOver) return;
+  const modal = document.getElementById('drawOfferModal');
+  if (modal) modal.style.display = 'flex';
+});
+
+// Draw offer: Accept
+const btnDrawAccept = document.getElementById('btn-draw-accept');
+if (btnDrawAccept) {
+  btnDrawAccept.addEventListener('click', () => {
+    document.getElementById('drawOfferModal').style.display = 'none';
+    socket.emit('drawResponse', match_id, true);
+    gameIsOver = true;
+    can_move = false;
+    disableAllGameActions();
+  });
+}
+
+// Draw offer: Decline
+const btnDrawDecline = document.getElementById('btn-draw-decline');
+if (btnDrawDecline) {
+  btnDrawDecline.addEventListener('click', () => {
+    document.getElementById('drawOfferModal').style.display = 'none';
+    socket.emit('drawResponse', match_id, false);
+  });
+}
+
+// Draw declined by opponent (sent back to offerer)
+socket.on('drawDeclined', () => {
+  drawOfferDeclined = true;
+  showToast('Draw offer declined');
+});
+
+// --- Incoming: Challenge from opponent ---
+socket.on('challengeReceived', (data) => {
+  if (gameIsOver) return;
+  const modal = document.getElementById('challengeModal');
+  if (modal) modal.style.display = 'flex';
+});
+
+// Challenge: Accept
+const btnChallengeAccept = document.getElementById('btn-challenge-accept');
+if (btnChallengeAccept) {
+  btnChallengeAccept.addEventListener('click', () => {
+    document.getElementById('challengeModal').style.display = 'none';
+    socket.emit('challengeResponse', match_id, true);
+    gameIsOver = true;
+    can_move = false;
+    disableAllGameActions();
+  });
+}
+
+// Challenge: Decline
+const btnChallengeDecline = document.getElementById('btn-challenge-decline');
+if (btnChallengeDecline) {
+  btnChallengeDecline.addEventListener('click', () => {
+    document.getElementById('challengeModal').style.display = 'none';
+    socket.emit('challengeResponse', match_id, false);
+  });
+}
+
+// Challenge declined by opponent
+socket.on('challengeDeclined', () => {
+  challengeDeclined = true;
+  showToast('Challenge declined');
+});
+
+// --- Incoming: Resign from opponent ---
+socket.on('resignReceived', (data) => {
+  gameIsOver = true;
+  can_move = false;
+  clearSession();
+  disableAllGameActions();
+  const colorName = data.resigned === 0 ? 'white' : 'black';
+  if (my_color === data.resigned) {
+    document.getElementById('status').innerText = 'You resigned. You lost. 😢';
+  } else {
+    document.getElementById('status').innerText = `${colorName} resigned. You won! 🎉`;
+  }
+});
+
+// --- Incoming: Game end (agreement draw) ---
+socket.on('gameEnd', (data) => {
+  gameIsOver = true;
+  can_move = false;
+  clearSession();
+  disableAllGameActions();
+  if (data.result === 'draw') {
+    document.getElementById('status').innerText = 'Draw by agreement! 🤝';
+  }
 });
 
 // return from server on whether a move was validated or not
@@ -179,7 +360,9 @@ socket.on('validated', (boardState, turnState, extra) => {
 // checkmate is reached
 socket.on('checkMate', turn => {
   can_move = false;
-  clearSession(); // game over, don't reconnect
+  gameIsOver = true;
+  clearSession();
+  disableAllGameActions();
   if(my_color == turnToColor(turn)){
     document.getElementById('status').innerText = 'Check Mate you lost! 😢';
   }
@@ -190,14 +373,18 @@ socket.on('checkMate', turn => {
 // stalemate (draw)
 socket.on('stalemate', () => {
   can_move = false;
+  gameIsOver = true;
   clearSession();
+  disableAllGameActions();
   document.getElementById('status').innerText = 'Stalemate — Draw! 🤝';
 });
 
 // draw (threefold repetition)
 socket.on('draw', (data) => {
   can_move = false;
+  gameIsOver = true;
   clearSession();
+  disableAllGameActions();
   if (!data) {
     document.getElementById('status').innerText = 'Ничья! 🤝';
     return;

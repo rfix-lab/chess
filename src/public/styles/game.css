@@ -145,3 +145,145 @@ canvas#cnv {
     font-size: 48px;
   }
 }
+
+/* === Game action buttons === */
+.game-actions {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.game-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #fff;
+}
+
+.game-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+
+.game-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.game-btn-secondary {
+  background: #555;
+}
+
+.game-btn-warning {
+  background: #e67e22;
+}
+
+.game-btn-danger {
+  background: #c0392b;
+}
+
+/* === Modal overlay & box === */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-box {
+  background: #1e1e2e;
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal-box h3 {
+  margin: 0 0 12px 0;
+  font-size: 20px;
+}
+
+.modal-box p {
+  margin: 0 0 20px 0;
+  color: #aaa;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.modal-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #fff;
+}
+
+.modal-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+
+.modal-btn-secondary {
+  background: #555;
+}
+
+.modal-btn-success {
+  background: #27ae60;
+}
+
+.modal-btn-danger {
+  background: #c0392b;
+}
+
+.modal-btn-primary {
+  background: #2980b9;
+}
+
+/* Notification toast */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #333;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 3000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s;
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes toastOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}

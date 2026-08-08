@@ -327,6 +327,89 @@ io.on('connection', socket => {
     }
   });
 
+  // Draw offer
+  socket.on('drawOffer', (matchId) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || match.gameEnded) return;
+
+    // Check if already offered and declined in this game
+    if (match.drawOffered === 'declined') return;
+
+    const playerColor = match.player1Socket.id === socket.id ? 0 : 1;
+    match.drawOffered = 'pending';
+
+    // Send offer to opponent
+    const opponent = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
+    if (opponent) {
+      opponent.emit('drawOfferReceived', { from: playerColor });
+    }
+  });
+
+  // Draw response (accept or decline)
+  socket.on('drawResponse', (matchId, accepted) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || !match.drawOffered || match.drawOffered === 'declined') return;
+
+    if (accepted) {
+      match.gameEnded = true;
+      match.drawOffered = null;
+      match.player1Socket.emit('gameEnd', { result: 'draw', reason: 'agreement' });
+      match.player2Socket.emit('gameEnd', { result: 'draw', reason: 'agreement' });
+    } else {
+      match.drawOffered = 'declined';
+      const offererColor = match.player1Socket.id !== socket.id ? 0 : 1;
+      // Notify the offerer that their offer was declined
+      const offerer = match.player1Socket.id === offererColor ? match.player1Socket : match.player2Socket;
+      if (offerer) offerer.emit('drawDeclined', {});
+    }
+  });
+
+  // Resign
+  socket.on('resign', (matchId) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || match.gameEnded) return;
+
+    match.gameEnded = true;
+    const resignedColor = match.player1Socket.id === socket.id ? 0 : 1;
+    match.player1Socket.emit('resignReceived', { resigned: resignedColor });
+    match.player2Socket.emit('resignReceived', { resigned: resignedColor });
+  });
+
+  // Challenge to resign
+  socket.on('challenge', (matchId) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || match.gameEnded) return;
+
+    if (match.challengeFrom === 'declined') return;
+
+    const playerColor = match.player1Socket.id === socket.id ? 0 : 1;
+    match.challengeFrom = 'pending';
+
+    const opponent = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
+    if (opponent) {
+      opponent.emit('challengeReceived', { from: playerColor });
+    }
+  });
+
+  // Challenge response
+  socket.on('challengeResponse', (matchId, accepted) => {
+    const match = matches.find(m => m.matchId === matchId);
+    if (!match || !match.challengeFrom || match.challengeFrom === 'declined') return;
+
+    if (accepted) {
+      match.gameEnded = true;
+      match.challengeFrom = null;
+      const challengedColor = match.player1Socket.id === socket.id ? 0 : 1;
+      match.player1Socket.emit('resignReceived', { resigned: challengedColor });
+      match.player2Socket.emit('resignReceived', { resigned: challengedColor });
+    } else {
+      match.challengeFrom = 'declined';
+      const challengerColor = match.player1Socket.id !== socket.id ? 0 : 1;
+      const challenger = match.player1Socket.id === challengerColor ? match.player1Socket : match.player2Socket;
+      if (challenger) challenger.emit('challengeDeclined', {});
+    }
+  });
+
   // thie route is fired when a socket disconnects
   socket.on('disconnect', () => {
     // console.log(`User[${socket.id}]: disconnected`);

@@ -21,6 +21,60 @@
     <div id="captured-white" class="captured-row"></div>
   </div>
   <h1 id="status">Waiting for player...</h1>
+
+  <!-- Game action buttons -->
+  <div id="game-actions" class="game-actions" style="display:none;">
+    <button id="btn-offer-draw" class="game-btn game-btn-secondary">Offer Draw</button>
+    <button id="btn-challenge" class="game-btn game-btn-warning">Challenge</button>
+    <button id="btn-resign" class="game-btn game-btn-danger">Resign</button>
+  </div>
+
+  <!-- Resign confirmation modal -->
+  <div id="resignModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>Resign?</h3>
+      <p>Are you sure you want to resign? You will lose the game.</p>
+      <div class="modal-actions">
+        <button id="btn-resign-cancel" class="modal-btn modal-btn-secondary">Cancel</button>
+        <button id="btn-resign-confirm" class="modal-btn modal-btn-danger">Resign</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incoming draw offer modal -->
+  <div id="drawOfferModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>🤝 Draw Offer</h3>
+      <p>Your opponent has offered a draw.</p>
+      <div class="modal-actions">
+        <button id="btn-draw-decline" class="modal-btn modal-btn-secondary">Decline</button>
+        <button id="btn-draw-accept" class="modal-btn modal-btn-success">Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incoming challenge modal -->
+  <div id="challengeModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>⚔️ Challenge</h3>
+      <p>Your opponent challenges you to resign.</p>
+      <div class="modal-actions">
+        <button id="btn-challenge-decline" class="modal-btn modal-btn-secondary">Decline</button>
+        <button id="btn-challenge-accept" class="modal-btn modal-btn-success">Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game end modal -->
+  <div id="gameEndModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3 id="gameEndTitle"></h3>
+      <p id="gameEndText"></p>
+      <div class="modal-actions">
+        <button onclick="document.getElementById('gameEndModal').style.display='none'; window.location.href='/index'" class="modal-btn modal-btn-primary">Back to Lobby</button>
+      </div>
+    </div>
+  </div>
   <script src="js/chessutils.js"></script>
   <script src="js/game.js"></script>
   <script src="js/gameSockets.js"></script>
