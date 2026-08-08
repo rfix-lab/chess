@@ -190,8 +190,8 @@ canvas#cnv {
   justify-content: center;
   font-size: 18px;
   padding: 2px 8px;
-  width: 95vw;
-  max-width: 480px;
+  width: min(95vw, 480px);
+  max-width: calc(min(95vw, 480px) - 16px);
   box-sizing: border-box;
 }
 

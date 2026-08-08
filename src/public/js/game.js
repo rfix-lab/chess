@@ -44,17 +44,21 @@ function sortCaptured(arr) {
 }
 
 function recalcLayout() {
-  const maxW = Math.min(window.innerWidth * 0.95, 600);
-  const maxH = window.innerHeight * 0.7;
-  const boardSize = Math.floor(Math.min(maxW, maxH));
-  const total = boardSize + 60;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  // Canvas must fit within vw minus 8px safe margin
+  const maxCanvas = Math.min(vw - 8, 480);
+  const maxH = vh * 0.7;
+  const total = Math.floor(Math.min(maxCanvas, maxH));
 
-  offset_x = 20;
-  offset_y = 20;
-  side_len = total - offset_x * 2 - 20;
+  offset_x = 10;
+  offset_y = 10;
+  side_len = total - offset_x * 2 - 10;
 
   canvas.width = total;
   canvas.height = total;
+  canvas.style.maxWidth = (vw - 8) + 'px';
+  canvas.style.maxHeight = (vh * 0.7) + 'px';
 }
 
 const delta_time = 10;
