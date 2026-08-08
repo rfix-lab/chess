@@ -339,6 +339,15 @@ function handle_drag() {
     let i = coords[0], j = coords[1];
 
     // if mouse got clicked, update the from_position
+    // Only process drag actions if mouse actually moved (isDragging flag)
+    // Otherwise this eats the click before onmouseup can handle click-to-move
+    if (is_mouse_down && !isDragging) {
+        // Just update tracking vars, don't touch the board yet
+        was_mouse_down = is_mouse_down;
+        curr_position = { "x": j, "y": i };
+        return;
+    }
+
     if(was_mouse_down == false && is_mouse_down == true){
         from_position.x = curr_position.x;
         from_position.y = curr_position.y;
@@ -395,7 +404,7 @@ function handle_drag() {
         if (!is_holding_piece) {
             // if not holding a piece, check if the current square has a piece
             // & (0b1111) is done as other bits maybe used for other purposes
-            if (board[i][j] & (0b1111) == 0) 
+            if ((board[i][j] & 0b1111) === 0) 
                 return;
             
             // set the holding piece to whatever is on that square
@@ -468,8 +477,12 @@ function display_possible_moves(){
 window.onload = () => {
     recalcLayout();
     draw();
-    fen_to_board(start_fen);
-    render_board();
+    // Only set initial board if there's no saved session (reconnect will restore state)
+    const saved = loadSession();
+    if (!saved) {
+        fen_to_board(start_fen);
+        render_board();
+    }
 }
 
 canvas.onmousedown = (e) => {

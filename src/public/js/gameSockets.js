@@ -289,51 +289,36 @@ socket.on('gameEnd', (data) => {
 
 // return from server on whether a move was validated or not
 socket.on('validated', (boardState, turnState, extra) => {
+  // Server rejected the move — show feedback and don't update board
+  if (extra && extra.rejected) {
+    wrong_move_sound.play();
+    const cnv = document.getElementById('cnv');
+    cnv.classList.add("shake");
+    setTimeout(() => cnv.classList.remove("shake"), 100);
+    is_being_validated = false;
+    // Don't clear selection — let the player try again
+    return;
+  }
+
   // Handle pending promotion — show selector before updating board
   if (extra && extra.pendingPromotion) {
     showPromotionSelector(extra.promotionColor);
   }
-  let changedSquares = 2;
-  // for(let i = 0; i < noOfSquares; i++){
-  //   for(let j = 0; j < noOfSquares; j++){
-  //     if(my_color == 0 && (boardState[i][j] == board[i][j]))
-  //       changedSquares++;
-  //     if(my_color == 1 && (boardState[i][j] == boardState[noOfSquares - i - 1][noOfSquares - j - 1]))
-  //       changedSquares++;
-  //   }
-  // }
-  if(can_move){
-    if(my_color == white){
-      if (((boardState[from_position.y][from_position.x] & 0b1111) == blank) 
+  // Play sound for the move (server already confirmed validity)
+  if (can_move) {
+    if (my_color == white) {
+      if (((boardState[from_position.y][from_position.x] & 0b1111) == blank)
         && (board[to_position.y][to_position.x] & 0b1111) != blank)
         capture_sound.play();
-      else if ((boardState[from_position.y][from_position.x] & (0b1111)) == blank)
-          move_sound.play();
-      else{
-        if(changedSquares > 1){
-          wrong_move_sound.play();
-          document.getElementById('cnv').classList.add("shake");
-          setTimeout(()=>{
-            document.getElementById('cnv').classList.remove("shake");
-          }, 100)
-        }
-      }
+      else if ((boardState[from_position.y][from_position.x] & 0b1111) == blank)
+        move_sound.play();
     }
-    else{
-      if (((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank) 
-        && (board[ no_of_squares - 1 - to_position.y][no_of_squares - 1 - to_position.x] & 0b1111) != blank)
+    else {
+      if (((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank)
+        && (board[no_of_squares - 1 - to_position.y][no_of_squares - 1 - to_position.x] & 0b1111) != blank)
         capture_sound.play();
-      else if ((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & (0b1111)) == blank)
-          move_sound.play();
-      else{
-        if(changedSquares == 0){
-          wrong_move_sound.play();
-          document.getElementById('cnv').classList.add("shake");
-          setTimeout(()=>{
-            document.getElementById('cnv').classList.remove("shake");
-          }, 100)
-        }
-      }
+      else if ((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank)
+        move_sound.play();
     }
   }
   if (my_color == 0)

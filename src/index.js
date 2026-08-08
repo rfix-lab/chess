@@ -56,7 +56,23 @@ io.on('connection', socket => {
     const match = matches[matchId];
     if (!match || !match.player1Socket || !match.player2Socket) return;
 
-    // Save state snapshot before move for takeback
+    // authenticating move
+    let valid = checkLegalMove(
+      match.boardState,
+      fromCoords, toCoords,
+      match
+    );
+
+    // Reject if not the current player's turn or move is illegal
+    if (!valid) {
+      // Send current board back with a rejection flag
+      const currentBoard = match.boardState.map((arr) => { return arr.slice(); });
+      match.player1Socket.emit('validated', currentBoard, match.turnState, { rejected: true });
+      match.player2Socket.emit('validated', currentBoard, match.turnState, { rejected: true });
+      return;
+    }
+
+    // Save state snapshot before move for takeback (only for valid moves)
     const snapshot = {
       board: match.boardState.map(arr => arr.slice()),
       turnState: match.turnState,
@@ -67,63 +83,54 @@ io.on('connection', socket => {
     };
     match.stateHistory.push(snapshot);
 
-    // authenticating move
-    let valid = checkLegalMove(
-      match.boardState,
-      fromCoords, toCoords,
-      match
-    );
-
     let sentBoard = match.boardState.map((arr) => { return arr.slice(); });
-    if (valid) {
-      const piece = match.boardState[fromCoords.y][fromCoords.x];
-      const destPiece = match.boardState[toCoords.y][toCoords.x];
-      const isPawn = getPiece(piece) === pawn;
-      const isCapture = destPiece !== blank;
+    const piece = match.boardState[fromCoords.y][fromCoords.x];
+    const destPiece = match.boardState[toCoords.y][toCoords.x];
+    const isPawn = getPiece(piece) === pawn;
+    const isCapture = destPiece !== blank;
 
-      chessMakeMove(match, fromCoords, toCoords);
+    chessMakeMove(match, fromCoords, toCoords);
 
-      // Update halfMoveClock
-      if (isPawn || isCapture) {
-        match.halfMoveClock = 0;
-      } else {
-        match.halfMoveClock++;
-      }
+    // Update halfMoveClock
+    if (isPawn || isCapture) {
+      match.halfMoveClock = 0;
+    } else {
+      match.halfMoveClock++;
+    }
 
-      // Record move in history (before turnState flip)
-      const turnBefore = 1 - match.turnState;
-      match.moveHistory.push({ from: fromCoords, to: toCoords, turn: turnBefore });
+    // Record move in history (before turnState flip)
+    const turnBefore = 1 - match.turnState;
+    match.moveHistory.push({ from: fromCoords, to: toCoords, turn: turnBefore });
 
-      // If pawn reached promotion square, wait for piece choice
-      if (match.pendingPromotion) {
-        sentBoard = match.boardState.map((arr) => { return arr.slice(); });
-        const promoColor = match.pendingPromotion.color;
-        match.player1Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
-        match.player2Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
-        return;
-      }
-
+    // If pawn reached promotion square, wait for piece choice
+    if (match.pendingPromotion) {
       sentBoard = match.boardState.map((arr) => { return arr.slice(); });
-      sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
-      sentBoard[toCoords.y][toCoords.x] |= 0b10000;
+      const promoColor = match.pendingPromotion.color;
+      match.player1Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
+      match.player2Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
+      return;
+    }
 
-      // En passant: highlight the target square next to a pawn that just moved 2 squares
-      const movedPiece = match.boardState[toCoords.y][toCoords.x];
-      if (movedPiece === (white | pawn) && fromCoords.y === 6 && toCoords.y === 4) {
-        sentBoard[4][fromCoords.x] |= 0b1000000;
-      }
-      if (movedPiece === (black | pawn) && fromCoords.y === 1 && toCoords.y === 3) {
-        sentBoard[3][fromCoords.x] |= 0b1000000;
-      }
+    sentBoard = match.boardState.map((arr) => { return arr.slice(); });
+    sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
+    sentBoard[toCoords.y][toCoords.x] |= 0b10000;
 
-      // Check indicator: highlight king if in check
-      const nextColor = turnToColor(match.turnState);
-      if (isKingInCheck(match.boardState, match.turnState)) {
-        for (let ki = 0; ki < 8; ki++) {
-          for (let kj = 0; kj < 8; kj++) {
-            if (match.boardState[ki][kj] === (king | nextColor)) {
-              sentBoard[ki][kj] |= 0b100000;
-            }
+    // En passant: highlight the target square next to a pawn that just moved 2 squares
+    const movedPiece = match.boardState[toCoords.y][toCoords.x];
+    if (movedPiece === (white | pawn) && fromCoords.y === 6 && toCoords.y === 4) {
+      sentBoard[4][fromCoords.x] |= 0b1000000;
+    }
+    if (movedPiece === (black | pawn) && fromCoords.y === 1 && toCoords.y === 3) {
+      sentBoard[3][fromCoords.x] |= 0b1000000;
+    }
+
+    // Check indicator: highlight king if in check
+    const nextColor = turnToColor(match.turnState);
+    if (isKingInCheck(match.boardState, match.turnState)) {
+      for (let ki = 0; ki < 8; ki++) {
+        for (let kj = 0; kj < 8; kj++) {
+          if (match.boardState[ki][kj] === (king | nextColor)) {
+            sentBoard[ki][kj] |= 0b100000;
           }
         }
       }
