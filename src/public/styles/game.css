@@ -1,3 +1,49 @@
+/* === Theme variables (dark is default) === */
+:root,
+:root[data-theme="dark"] {
+  --board-light: #c1c8d4;
+  --board-dark: #4f5969;
+  --bg: #3a3f47;
+  --text: #ffffff;
+  --panel-bg: #2c3038;
+  --panel-border: #4a4f58;
+  --button-bg: #4f5969;
+  --button-hover: #5a6578;
+  --coord-color: #cccccc;
+  --status-color: #cccccc;
+  --promotion-bg: #2d2d2d;
+  --promotion-text: #ffffff;
+  --promotion-piece-bg: #444444;
+  --promotion-piece-border: #666666;
+  --promotion-piece-hover: #555555;
+  --promotion-piece-hover-border: #888888;
+  --repeat-modal-bg: #1a1a2e;
+  --repeat-modal-text: #cccccc;
+  --repeat-modal-btn-bg: #333333;
+}
+
+:root[data-theme="light"] {
+  --board-light: #f0d9b5;
+  --board-dark: #b58863;
+  --bg: #f5f5f5;
+  --text: #333333;
+  --panel-bg: #ffffff;
+  --panel-border: #cccccc;
+  --button-bg: #e0e0e0;
+  --button-hover: #d0d0d0;
+  --coord-color: #333333;
+  --status-color: #333333;
+  --promotion-bg: #ffffff;
+  --promotion-text: #333333;
+  --promotion-piece-bg: #f0f0f0;
+  --promotion-piece-border: #cccccc;
+  --promotion-piece-hover: #e0e0e0;
+  --promotion-piece-hover-border: #999999;
+  --repeat-modal-bg: #ffffff;
+  --repeat-modal-text: #333333;
+  --repeat-modal-btn-bg: #e0e0e0;
+}
+
 .hide {
   display: none;
 }
@@ -39,11 +85,13 @@
     z-index: 1000;
 }
 .promotion-content {
-    background: #2d2d2d;
+    background: var(--promotion-bg);
     border-radius: 12px;
     padding: 24px;
     text-align: center;
-    color: #fff;
+    color: var(--promotion-text);
+    border: 1px solid var(--panel-border);
+    transition: background 0.3s, color 0.3s;
 }
 .promotion-content h3 {
     margin: 0 0 16px 0;
@@ -55,8 +103,8 @@
 }
 .promotion-piece {
     font-size: 48px;
-    background: #444;
-    border: 2px solid #666;
+    background: var(--promotion-piece-bg);
+    border: 2px solid var(--promotion-piece-border);
     border-radius: 8px;
     width: 80px;
     height: 80px;
@@ -67,9 +115,33 @@
     transition: all 0.2s;
 }
 .promotion-piece:hover {
-    background: #555;
-    border-color: #888;
+    background: var(--promotion-piece-hover);
+    border-color: var(--promotion-piece-hover-border);
     transform: scale(1.1);
+}
+
+/* === Theme toggle === */
+.theme-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 999;
+  background: var(--button-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  transition: background 0.3s, border-color 0.3s, transform 0.2s;
+}
+.theme-toggle:hover {
+  background: var(--button-hover);
+  transform: scale(1.1);
 }
 
 /* === Mobile / responsive layout === */
@@ -79,8 +151,10 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: #2a2a2a;
+  background: var(--bg);
+  color: var(--text);
   min-height: 100vh;
+  transition: background 0.3s, color 0.3s;
 }
 
 #game-container {
@@ -94,10 +168,11 @@ body {
 
 #status {
   text-align: center;
-  color: #ccc;
+  color: var(--status-color);
   font-size: 14px;
   margin: 8px 0;
   padding: 0 8px;
+  transition: color 0.3s;
 }
 
 canvas#cnv {
@@ -164,6 +239,7 @@ canvas#cnv {
   cursor: pointer;
   transition: all 0.2s;
   color: #fff;
+  background: var(--button-bg);
 }
 
 .game-btn:hover:not(:disabled) {
@@ -179,7 +255,7 @@ canvas#cnv {
 }
 
 .game-btn-secondary {
-  background: #555;
+  background: var(--button-bg);
 }
 
 .game-btn-warning {
@@ -188,6 +264,10 @@ canvas#cnv {
 
 .game-btn-danger {
   background: #c0392b;
+}
+
+.game-btn-info {
+  background: #2980b9;
 }
 
 /* === Modal overlay & box === */
@@ -202,14 +282,14 @@ canvas#cnv {
 }
 
 .modal-box {
-  background: #1e1e2e;
+  background: var(--panel-bg);
   border-radius: 12px;
   padding: 28px 32px;
   max-width: 380px;
   width: 90%;
   text-align: center;
-  color: #fff;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
 .modal-box h3 {
@@ -219,7 +299,7 @@ canvas#cnv {
 
 .modal-box p {
   margin: 0 0 20px 0;
-  color: #aaa;
+  color: var(--status-color);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -247,7 +327,7 @@ canvas#cnv {
 }
 
 .modal-btn-secondary {
-  background: #555;
+  background: var(--button-bg);
 }
 
 .modal-btn-success {
@@ -268,13 +348,13 @@ canvas#cnv {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: #333;
-  color: #fff;
+  background: var(--panel-bg);
+  color: var(--text);
   padding: 10px 20px;
   border-radius: 8px;
   font-size: 14px;
   z-index: 3000;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s;
 }
 
