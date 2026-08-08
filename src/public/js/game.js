@@ -14,11 +14,7 @@ const check_square_color = '#ff4444';
 
 const start_fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
 
-const side_len = 400;
-const offset_x = 25;
-const offset_y = 25;
-const delta_time = 10;
-
+let side_len, offset_x, offset_y;
 const no_of_squares = 8;
 const blank = 0b0000;
 const white = 0b0000;
@@ -30,6 +26,38 @@ const queen = 0b0011;
 const rook = 0b0100;
 const bishop = 0b0101;
 const knight = 0b0110;
+
+// Captured pieces tracking
+let capturedByWhite = [];
+let capturedByBlack = [];
+
+const pieceSortOrder = {
+  0b0011: 0, // queen
+  0b0100: 1, // rook
+  0b0101: 2, // bishop
+  0b0110: 3, // knight
+  0b0001: 4, // pawn
+};
+
+function sortCaptured(arr) {
+  return arr.slice().sort((a, b) => (pieceSortOrder[a] || 9) - (pieceSortOrder[b] || 9));
+}
+
+function recalcLayout() {
+  const maxW = Math.min(window.innerWidth * 0.95, 600);
+  const maxH = window.innerHeight * 0.7;
+  const boardSize = Math.floor(Math.min(maxW, maxH));
+  const total = boardSize + 60;
+
+  offset_x = 20;
+  offset_y = 20;
+  side_len = total - offset_x * 2 - 20;
+
+  canvas.width = total;
+  canvas.height = total;
+}
+
+const delta_time = 10;
 
 let is_mouse_down = false;
 let was_mouse_down = false;
@@ -236,6 +264,16 @@ function handle_drag() {
         to_position.x = curr_position.x;
         to_position.y = curr_position.y;
 
+        // Detect capture
+        if ((old_piece & 0b0111) !== blank) {
+            const capturedType = old_piece & 0b0111;
+            if (my_color === white) {
+                capturedByWhite.push(capturedType);
+            } else {
+                capturedByBlack.push(capturedType);
+            }
+        }
+
         // send movement data to the server
         if (my_color == 0){
             // if(!coordEqual(from_position, to_position))
@@ -339,6 +377,7 @@ function display_possible_moves(){
 }
 
 window.onload = () => {
+    recalcLayout();
     draw();
     fen_to_board(start_fen);
     render_board();
@@ -355,16 +394,16 @@ canvas.onmouseup = () => {
     // console.log(mouse_x, mouse_y);
 }
 
-canvas.ontouchstart = () => {
-    // console.log('down');
+canvas.ontouchstart = (e) => {
     is_mouse_down = true;
-    // console.log(mouse_x, mouse_y);
-}
-canvas.ontouchend = () => {
-    // console.log('up');
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    mouse_x = touch.clientX - rect.left;
+    mouse_y = touch.clientY - rect.top;
+};
+canvas.ontouchend = (e) => {
     is_mouse_down = false;
-    // console.log(mouse_x, mouse_y);
-}
+};
 
 
 canvas.onmousemove = (event) => {
@@ -373,25 +412,60 @@ canvas.onmousemove = (event) => {
 }
 canvas.ontouchmove = (e) => {
     e.preventDefault();
-    mouse_x = e.touches[0].clientX;
-    mouse_y = e.touches[0].clientY;
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    mouse_x = touch.clientX - rect.left;
+    mouse_y = touch.clientY - rect.top;
+};
+
+function renderCapturedPieces() {
+    const whiteRow = document.getElementById('captured-white');
+    const blackRow = document.getElementById('captured-black');
+    if (!whiteRow || !blackRow) return;
+
+    let whiteHtml = '';
+    let blackHtml = '';
+
+    // White's captures (black pieces taken by white)
+    sortCaptured(capturedByWhite).forEach(p => {
+        const sym = sprites[black | p];
+        if (sym) whiteHtml += `<span class="cap-piece">${sym}</span>`;
+    });
+
+    // Black's captures (white pieces taken by black)
+    sortCaptured(capturedByBlack).forEach(p => {
+        const sym = sprites[white | p];
+        if (sym) blackHtml += `<span class="cap-piece">${sym}</span>`;
+    });
+
+    // For the player's view: show their captures below, opponent's above
+    if (my_color === white) {
+        whiteRow.innerHTML = whiteHtml;
+        blackRow.innerHTML = blackHtml;
+    } else {
+        whiteRow.innerHTML = blackHtml;
+        blackRow.innerHTML = whiteHtml;
+    }
 }
 
 // main draw loop
 setInterval(() => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     draw();
-    
+
     if(can_move)
         handle_drag();
-    
+
     render_board();
+    renderCapturedPieces();
     if(is_holding_piece){
         board[from_position.y][from_position.x] = holding_piece;
         display_possible_moves();
         board[from_position.y][from_position.x] = blank;
     }
 }, delta_time);
+
+window.onresize = () => { recalcLayout(); };
 
 function showPromotionSelector(color) {
     const modal = document.getElementById('promotionModal');

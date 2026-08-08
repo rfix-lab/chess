@@ -52,7 +52,9 @@ if (!tryReconnect()) {
 socket.on('startGame', (color, gameId) => {
   my_color = color;
   match_id = gameId;
-  saveSession(gameId, color); // persist session
+  saveSession(gameId, color);
+  capturedByWhite = [];
+  capturedByBlack = [];
   if (color == 0) {
     document.getElementById('status').innerText = 'Playing as white';
     can_move = true;
@@ -74,6 +76,8 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
   my_color = color;
   match_id = gameId;
   saveSession(gameId, color);
+  capturedByWhite = [];
+  capturedByBlack = [];
 
   // Restore board from server state
   if (color == 0) {

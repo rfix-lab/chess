@@ -15,8 +15,12 @@
 </head>
 
 <body>
+  <div id="game-container">
+    <div id="captured-black" class="captured-row"></div>
+    <canvas id="cnv"></canvas>
+    <div id="captured-white" class="captured-row"></div>
+  </div>
   <h1 id="status">Waiting for player...</h1>
-  <canvas id="cnv" width="450" height="450"></canvas>
   <script src="js/chessutils.js"></script>
   <script src="js/game.js"></script>
   <script src="js/gameSockets.js"></script>
