@@ -61,6 +61,7 @@ function colorToTurn(color) {
 
 export function chessMakeMove(match, fromCoords, toCoords) {
     let piece = match.boardState[fromCoords.y][fromCoords.x];
+    let destPiece = match.boardState[toCoords.y][toCoords.x];
     let isWhitePawn = (getPiece(piece) == pawn && getColor(piece) == white);
     let isBlackPawn = (getPiece(piece) == pawn && getColor(piece) == black);
 
@@ -103,15 +104,11 @@ export function chessMakeMove(match, fromCoords, toCoords) {
         }
     }
 
-    // En passant capture
-    if ((piece & pawn) === pawn && toCoords.y !== fromCoords.y && fromCoords.x !== toCoords.x) {
-        const capturedPawnSquare = match.boardState[fromCoords.y][toCoords.x];
-        if (capturedPawnSquare === blank && match.lastMove) {
-            const lmPiece = match.lastMove.piece;
-            if ((lmPiece & pawn) === pawn) {
-                match.boardState[fromCoords.y][toCoords.x] = 0;
-            }
-        }
+    // En passant capture: pawn moves diagonally to an EMPTY square
+    // (normal diagonal capture already handled by moving the pawn above).
+    // Remove the captured pawn on the same row as the moving pawn.
+    if ((piece & pawn) === pawn && fromCoords.x !== toCoords.x && destPiece === blank) {
+        match.boardState[fromCoords.y][toCoords.x] = 0; // remove captured pawn
     }
 
     // Pawn promotion: mark pending, don't change turn yet
