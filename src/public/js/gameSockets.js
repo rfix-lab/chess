@@ -165,6 +165,9 @@ socket.on('validated', (boardState, turnState, extra) => {
     }
   }
   is_being_validated = false;
+  // Clear click-to-move selection after server response
+  selectedSquare = null;
+  legalMoveSquares.clear();
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';
     can_move = true;
@@ -179,6 +182,8 @@ socket.on('validated', (boardState, turnState, extra) => {
 // checkmate is reached
 socket.on('checkMate', turn => {
   can_move = false;
+  selectedSquare = null;
+  legalMoveSquares.clear();
   clearSession(); // game over, don't reconnect
   if(my_color == turnToColor(turn)){
     document.getElementById('status').innerText = 'Check Mate you lost! 😢';
