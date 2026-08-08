@@ -38,6 +38,7 @@ export function initMatch(id, playerSocket) {
     },
     lastMove: null,
     moveHistory: [],
+    halfMoveClock: 0,
     private: false
   }
 }
