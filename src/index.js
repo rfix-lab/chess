@@ -7,7 +7,7 @@ import path from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn } from './lib/chessutils.js';
+import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
 import { authenticateUser, signupUser } from './lib/auth.js';
 
@@ -67,6 +67,10 @@ io.on('connection', socket => {
     if (valid) {
       chessMakeMove(match, fromCoords, toCoords);
 
+      // Record move in history (before turnState flip)
+      const turnBefore = 1 - match.turnState;
+      match.moveHistory.push({ from: fromCoords, to: toCoords, turn: turnBefore });
+
       // If pawn reached promotion square, wait for piece choice
       if (match.pendingPromotion) {
         sentBoard = match.boardState.map((arr) => { return arr.slice(); });
@@ -104,6 +108,18 @@ io.on('connection', socket => {
 
     match.player1Socket.emit('validated', sentBoard, match.turnState);
     match.player2Socket.emit('validated', sentBoard, match.turnState);
+
+    // Check threefold repetition
+    const threefold = checkThreefoldDraw(match);
+    if (threefold.draw) {
+      match.player1Socket.emit('draw', { reason: 'threefold' });
+      match.player2Socket.emit('draw', { reason: 'threefold' });
+      return;
+    }
+    if (threefold.isWarning) {
+      match.player1Socket.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
+      match.player2Socket.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
+    }
 
     // check if game over
     const endReason = isGameEndReason(match.boardState, match.turnState);
@@ -223,6 +239,9 @@ io.on('connection', socket => {
     match.pendingPromotion = null;
     match.turnState = 1 - match.turnState;
 
+    // Record the original pawn move in history (turn before flip)
+    match.moveHistory.push({ from: from, to: to, turn: color === white ? 0 : 1 });
+
     const board = match.boardState.map((arr) => { return arr.slice(); });
     // En passant indicator after promotion (pawn moved 2 squares before promotion)
     const promotedPiece = match.boardState[to.y][to.x];
@@ -247,6 +266,18 @@ io.on('connection', socket => {
 
     socket.emit('validated', board, match.turnState);
     if (opponent) opponent.emit('validated', board, match.turnState);
+
+    // Check threefold repetition
+    const threefold = checkThreefoldDraw(match);
+    if (threefold.draw) {
+      socket.emit('draw', { reason: 'threefold' });
+      if (opponent) opponent.emit('draw', { reason: 'threefold' });
+      return;
+    }
+    if (threefold.isWarning) {
+      socket.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
+      if (opponent) opponent.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
+    }
 
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason === 'checkmate') {

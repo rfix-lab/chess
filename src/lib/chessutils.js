@@ -605,4 +605,41 @@ export function checkMateCheck(board, turn){
     return isGameEndReason(board, turn) == 'checkmate';
 }
 
+export function checkThreefoldDraw(match) {
+  const history = match.moveHistory;
+  if (history.length < 2) return { draw: false, isWarning: false };
+
+  // Build complete round pairs: (move[i], move[i+1]) stepping by 2
+  const pairCount = {};
+  for (let i = 0; i + 1 < history.length; i += 2) {
+    const a = history[i], b = history[i + 1];
+    const key = `${a.from.x},${a.from.y}-${a.to.x},${a.to.y}|${b.from.x},${b.from.y}-${b.to.x},${b.to.y}`;
+    pairCount[key] = (pairCount[key] || 0) + 1;
+  }
+
+  // Draw: any round pattern appeared 3+ times
+  for (const key of Object.keys(pairCount)) {
+    if (pairCount[key] >= 3) {
+      return { draw: true, isWarning: false };
+    }
+  }
+
+  // Warning: incomplete round — last move matches the first half of a 2-count pattern
+  if (history.length % 2 === 1) {
+    const last = history[history.length - 1];
+    for (const key of Object.keys(pairCount)) {
+      if (pairCount[key] !== 2) continue;
+      const parts = key.split('|')[0];
+      const firstHalf = `${last.from.x},${last.from.y}-${last.to.x},${last.to.y}`;
+      if (firstHalf === parts) {
+        const parts2 = key.split('|');
+        const desc = `⚠️ The same pair of moves has been repeated twice: ${parts2[0]}, then ${parts2[1]}. One more time and it's a draw.`;
+        return { draw: false, isWarning: true, patternDescription: desc };
+      }
+    }
+  }
+
+  return { draw: false, isWarning: false };
+}
+
 

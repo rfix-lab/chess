@@ -28,6 +28,15 @@
       <div id="promotionChoices" class="promotion-choices"></div>
     </div>
   </div>
+
+  <!-- Repetition warning modal -->
+  <div id="repetitionWarningModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:#1a1a2e; padding:30px; border-radius:12px; max-width:400px; text-align:center;">
+      <h3 style="color:#ffcc00;">⚠️ Внимание</h3>
+      <p id="repetitionWarningText" style="color:#ccc;"></p>
+      <button onclick="document.getElementById('repetitionWarningModal').style.display='none'" style="margin-top:15px; padding:10px 30px; background:#333; color:#fff; border:none; border-radius:6px; cursor:pointer;">OK</button>
+    </div>
+  </div>
 </body>
 
 </html>

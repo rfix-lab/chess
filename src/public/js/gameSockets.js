@@ -189,3 +189,20 @@ socket.on('stalemate', () => {
   clearSession();
   document.getElementById('status').innerText = 'Stalemate — Draw! 🤝';
 });
+
+// draw (threefold repetition)
+socket.on('draw', (data) => {
+  can_move = false;
+  clearSession();
+  if (data && data.reason === 'threefold') {
+    document.getElementById('status').innerText = 'Ничья — три повторения хода! 🤝';
+  } else {
+    document.getElementById('status').innerText = 'Draw! 🤝';
+  }
+});
+
+// repetition warning
+socket.on('repetitionWarning', (data) => {
+  document.getElementById('repetitionWarningText').innerText = data.patternDescription;
+  document.getElementById('repetitionWarningModal').style.display = 'block';
+});

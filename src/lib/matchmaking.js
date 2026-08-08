@@ -37,6 +37,7 @@ export function initMatch(id, playerSocket) {
       blackQueenSide: true
     },
     lastMove: null,
+    moveHistory: [],
     private: false
   }
 }
