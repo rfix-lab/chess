@@ -7,7 +7,7 @@ import path from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king } from './lib/chessutils.js';
+import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
 import { authenticateUser, signupUser } from './lib/auth.js';
 
@@ -79,6 +79,15 @@ io.on('connection', socket => {
       sentBoard = match.boardState.map((arr) => { return arr.slice(); });
       sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
       sentBoard[toCoords.y][toCoords.x] |= 0b10000;
+
+      // En passant: highlight the target square next to a pawn that just moved 2 squares
+      const movedPiece = match.boardState[toCoords.y][toCoords.x];
+      if (movedPiece === (white | pawn) && fromCoords.y === 6 && toCoords.y === 4) {
+        sentBoard[4][fromCoords.x] |= 0b1000000;
+      }
+      if (movedPiece === (black | pawn) && fromCoords.y === 1 && toCoords.y === 3) {
+        sentBoard[3][fromCoords.x] |= 0b1000000;
+      }
 
       // Check indicator: highlight king if in check
       const nextColor = turnToColor(match.turnState);
@@ -215,6 +224,14 @@ io.on('connection', socket => {
     match.turnState = 1 - match.turnState;
 
     const board = match.boardState.map((arr) => { return arr.slice(); });
+    // En passant indicator after promotion (pawn moved 2 squares before promotion)
+    const promotedPiece = match.boardState[to.y][to.x];
+    if (promotedPiece === (white | pieceType) && from.y === 6 && to.y === 7) {
+      board[4][from.x] |= 0b1000000;
+    }
+    if (promotedPiece === (black | pieceType) && from.y === 1 && to.y === 0) {
+      board[3][from.x] |= 0b1000000;
+    }
     // Check indicator: highlight king if in check
     const nextColor2 = turnToColor(match.turnState);
     if (isKingInCheck(match.boardState, match.turnState)) {

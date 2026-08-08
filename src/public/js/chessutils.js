@@ -224,6 +224,10 @@ function whitePawnMoveValidate(board, moveFromCoord, moveToCoord) {
 
     // can move diagonally only during captures
     if (differenceX == 1 && destValue == blank) {
+        // En passant: check if adjacent enemy pawn moved 2 squares
+        if (moveToCoord.y == moveFromCoord.y - 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == black) {
+          return true;
+        }
         // console.log('Chess Error: cant move diagonally without enemy');
         return false;
     }
@@ -262,8 +266,13 @@ function blackPawnMoveValidate(board, moveFromCoord, moveToCoord) {
     }
 
     // can move diagonally only during captures
-    if (differenceX == 1 && destValue == blank)
+    if (differenceX == 1 && destValue == blank) {
+        // En passant: check if adjacent enemy pawn moved 2 squares
+        if (moveToCoord.y == moveFromCoord.y + 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == white) {
+          return true;
+        }
         return false;
+    }
 
     return true;
 }
