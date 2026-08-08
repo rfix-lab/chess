@@ -10,6 +10,7 @@ const dark_square_color = '#4f5969';
 const light_square_color = '#c1c8d4';
 const move_square_color = '#7af4ae';
 const possible_move_color = '#74f551';
+const check_square_color = '#ff4444';
 
 const start_fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
 
@@ -153,6 +154,10 @@ function draw() {
             if(board.length != 0  && (board[j][i] & 0b10000) > 0){
                 // console.log(i, j)
                 ctx.fillStyle = move_square_color;
+            }
+            // Check indicator: red highlight on king's square
+            if (board[j][i] & 0b100000) {
+                ctx.fillStyle = check_square_color;
             }
 
             ctx.fillRect(offset_x + i * side_len_square,

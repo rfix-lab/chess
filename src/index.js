@@ -7,7 +7,7 @@ import path from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { chessMakeMove, checkLegalMove, isGameEndReason } from './lib/chessutils.js';
+import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
 import { authenticateUser, signupUser } from './lib/auth.js';
 
@@ -79,6 +79,18 @@ io.on('connection', socket => {
       sentBoard = match.boardState.map((arr) => { return arr.slice(); });
       sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
       sentBoard[toCoords.y][toCoords.x] |= 0b10000;
+
+      // Check indicator: highlight king if in check
+      const nextColor = turnToColor(match.turnState);
+      if (isKingInCheck(match.boardState, match.turnState)) {
+        for (let ki = 0; ki < 8; ki++) {
+          for (let kj = 0; kj < 8; kj++) {
+            if (match.boardState[ki][kj] === (king | nextColor)) {
+              sentBoard[ki][kj] |= 0b100000;
+            }
+          }
+        }
+      }
     }
 
     match.player1Socket.emit('validated', sentBoard, match.turnState);
@@ -156,6 +168,19 @@ io.on('connection', socket => {
     // Deep-copy board state to avoid move indicator bits
     const cleanBoard = match.boardState.map((arr) => arr.slice().map((v) => v & 0b01111));
 
+    // Add check indicator if applicable
+    const reconnectedColor = color === 0 ? 0 : 1;
+    if (isKingInCheck(match.boardState, reconnectedColor)) {
+      const kingColor = turnToColor(reconnectedColor);
+      for (let ki = 0; ki < 8; ki++) {
+        for (let kj = 0; kj < 8; kj++) {
+          if (match.boardState[ki][kj] === (king | kingColor)) {
+            cleanBoard[ki][kj] |= 0b100000;
+          }
+        }
+      }
+    }
+
     socket.emit('reconnected', color, gameId, cleanBoard, match.turnState);
   });
 
@@ -190,6 +215,17 @@ io.on('connection', socket => {
     match.turnState = 1 - match.turnState;
 
     const board = match.boardState.map((arr) => { return arr.slice(); });
+    // Check indicator: highlight king if in check
+    const nextColor2 = turnToColor(match.turnState);
+    if (isKingInCheck(match.boardState, match.turnState)) {
+      for (let ki = 0; ki < 8; ki++) {
+        for (let kj = 0; kj < 8; kj++) {
+          if (match.boardState[ki][kj] === (king | nextColor2)) {
+            board[ki][kj] |= 0b100000;
+          }
+        }
+      }
+    }
     const opponent = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
 
     socket.emit('validated', board, match.turnState);
