@@ -155,6 +155,10 @@ function draw() {
                 // console.log(i, j)
                 ctx.fillStyle = move_square_color;
             }
+            // En passant target square indicator
+            if(board[j][i] & 0b1000000) {
+                ctx.fillStyle = '#ffcc44';
+            }
             // Check indicator: red highlight on king's square
             if (board[j][i] & 0b100000) {
                 ctx.fillStyle = check_square_color;
