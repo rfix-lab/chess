@@ -6,8 +6,8 @@ const wrong_move_sound = new Audio('/audio/wrong_move_sound.mp3');
 const canvas = document.getElementById("cnv");
 const ctx = canvas.getContext('2d');
 
-const dark_square_color = '#4f5969';
-const light_square_color = '#c1c8d4';
+var dark_square_color = '#4f5969';
+var light_square_color = '#c1c8d4';
 const move_square_color = '#7af4ae';
 const possible_move_color = '#74f551';
 const check_square_color = '#ff4444';
@@ -589,6 +589,13 @@ setInterval(() => {
         board[from_position.y][from_position.x] = blank;
     }
 }, delta_time);
+
+// Update board square colors from CSS variables (called on theme change)
+function updateBoardColors() {
+  var root = getComputedStyle(document.documentElement);
+  dark_square_color = root.getPropertyValue('--board-dark').trim() || '#4f5969';
+  light_square_color = root.getPropertyValue('--board-light').trim() || '#c1c8d4';
+}
 
 window.onresize = () => { recalcLayout(); };
 
