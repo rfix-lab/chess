@@ -194,11 +194,16 @@ socket.on('stalemate', () => {
 socket.on('draw', (data) => {
   can_move = false;
   clearSession();
-  if (data && data.reason === 'threefold') {
-    document.getElementById('status').innerText = 'Ничья — три повторения хода! 🤝';
-  } else {
-    document.getElementById('status').innerText = 'Draw! 🤝';
+  if (!data) {
+    document.getElementById('status').innerText = 'Ничья! 🤝';
+    return;
   }
+  const reasons = {
+    'threefold': 'Ничья — три повторения хода! 🤝',
+    'insufficient': 'Ничья — недостаточный материал! 🤝',
+    'fifty': 'Ничья — правило 50 ходов! 🤝',
+  };
+  document.getElementById('status').innerText = reasons[data.reason] || 'Ничья! 🤝';
 });
 
 // repetition warning

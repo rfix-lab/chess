@@ -5,7 +5,7 @@ const noOfSquares = 8;
 const whiteTurn = 0;
 const blackTurn = 1;
 
-const blank = 0b0000;
+export const blank = 0b0000;
 export const white = 0b0000;
 export const black = 0b1000;
 
@@ -13,8 +13,8 @@ export const pawn = 0b0001;
 export const king = 0b0010;
 const queen = 0b0011;
 const rook = 0b0100;
-const bishop = 0b0101;
-const knight = 0b0110;
+export const bishop = 0b0101;
+export const knight = 0b0110;
 
 function Coord(x, y) {
     let coord = { "x": x, "y": y };
@@ -33,12 +33,12 @@ function coordEqual(a, b) {
     return a.x == b.x && a.y == b.y;
 }
 
-function getPiece(value) {
+export function getPiece(value) {
     // the piece information is stored in the first 3 bits
     return value & (0b111);
 }
 
-function getColor(value) {
+export function getColor(value) {
     if (value == blank)
         return -1;
     // the 4th bit denotes color
@@ -640,6 +640,53 @@ export function checkThreefoldDraw(match) {
   }
 
   return { draw: false, isWarning: false };
+}
+
+export function isInsufficientMaterial(board) {
+  const whitePieces = [];
+  const blackPieces = [];
+
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const piece = board[y][x];
+      if (piece === blank) continue;
+      const color = getColor(piece);
+      const type = getPiece(piece);
+      if (color === white) whitePieces.push({ type, x, y });
+      if (color === black) blackPieces.push({ type, x, y });
+    }
+  }
+
+  // Remove kings from lists
+  const wNonKing = whitePieces.filter(p => p.type !== king);
+  const bNonKing = blackPieces.filter(p => p.type !== king);
+
+  const wCount = wNonKing.length;
+  const bCount = bNonKing.length;
+
+  // K vs K
+  if (wCount === 0 && bCount === 0) return true;
+
+  // K+B vs K or K vs K+B
+  if (wCount === 1 && bCount === 0 && wNonKing[0].type === bishop) return true;
+  if (wCount === 0 && bCount === 1 && bNonKing[0].type === bishop) return true;
+
+  // K+N vs K or K vs K+N
+  if (wCount === 1 && bCount === 0 && wNonKing[0].type === knight) return true;
+  if (wCount === 0 && bCount === 1 && bNonKing[0].type === knight) return true;
+
+  // K+B vs K+B same color
+  if (wCount === 1 && bCount === 1 && wNonKing[0].type === bishop && bNonKing[0].type === bishop) {
+    const wbColor = (wNonKing[0].x + wNonKing[0].y) % 2;
+    const bbColor = (bNonKing[0].x + bNonKing[0].y) % 2;
+    if (wbColor === bbColor) return true;
+  }
+
+  return false;
+}
+
+export function isFiftyMoveRule(board, halfMoveClock) {
+  return halfMoveClock >= 100;
 }
 
 

@@ -7,7 +7,7 @@ import path from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw } from './lib/chessutils.js';
+import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
 import { authenticateUser, signupUser } from './lib/auth.js';
 
@@ -65,7 +65,19 @@ io.on('connection', socket => {
 
     let sentBoard = match.boardState.map((arr) => { return arr.slice(); });
     if (valid) {
+      const piece = match.boardState[fromCoords.y][fromCoords.x];
+      const destPiece = match.boardState[toCoords.y][toCoords.x];
+      const isPawn = getPiece(piece) === pawn;
+      const isCapture = destPiece !== blank;
+
       chessMakeMove(match, fromCoords, toCoords);
+
+      // Update halfMoveClock
+      if (isPawn || isCapture) {
+        match.halfMoveClock = 0;
+      } else {
+        match.halfMoveClock++;
+      }
 
       // Record move in history (before turnState flip)
       const turnBefore = 1 - match.turnState;
@@ -121,7 +133,19 @@ io.on('connection', socket => {
       match.player2Socket.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
     }
 
-    // check if game over
+    // Check insufficient material
+    if (isInsufficientMaterial(match.boardState)) {
+      match.player1Socket.emit('draw', { reason: 'insufficient' });
+      match.player2Socket.emit('draw', { reason: 'insufficient' });
+      return;
+    }
+
+    // Check 50-move rule
+    if (isFiftyMoveRule(match.boardState, match.halfMoveClock)) {
+      match.player1Socket.emit('draw', { reason: 'fifty' });
+      match.player2Socket.emit('draw', { reason: 'fifty' });
+      return;
+    }
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason === 'checkmate') {
       match.player1Socket.emit('checkMate', match.turnState);
@@ -277,6 +301,20 @@ io.on('connection', socket => {
     if (threefold.isWarning) {
       socket.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
       if (opponent) opponent.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
+    }
+
+    // Check insufficient material
+    if (isInsufficientMaterial(match.boardState)) {
+      socket.emit('draw', { reason: 'insufficient' });
+      if (opponent) opponent.emit('draw', { reason: 'insufficient' });
+      return;
+    }
+
+    // Check 50-move rule
+    if (isFiftyMoveRule(match.boardState, match.halfMoveClock)) {
+      socket.emit('draw', { reason: 'fifty' });
+      if (opponent) opponent.emit('draw', { reason: 'fifty' });
+      return;
     }
 
     const endReason = isGameEndReason(match.boardState, match.turnState);
