@@ -107,6 +107,10 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
     document.getElementById('status').innerText = 'Opponent\'s turn';
     can_move = false;
   }
+  // Redraw the board after restoring state
+  draw();
+  render_board();
+  renderCapturedPieces();
 });
 
 // Server says game is gone → redirect to lobby
@@ -342,6 +346,9 @@ socket.on('validated', (boardState, turnState, extra) => {
     document.getElementById('status').innerText = 'Opponent\'s turn';
     can_move = false;
   }
+  // Redraw the board after move validation
+  render_board();
+  renderCapturedPieces();
   
 });
 
