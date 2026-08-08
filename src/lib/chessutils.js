@@ -10,7 +10,7 @@ const white = 0b0000;
 const black = 0b1000;
 
 const pawn = 0b0001;
-const king = 0b0010;
+export const king = 0b0010;
 const queen = 0b0011;
 const rook = 0b0100;
 const bishop = 0b0101;
@@ -45,7 +45,7 @@ function getColor(value) {
     return value & (0b1000);
 }
 
-function turnToColor(turn) {
+export function turnToColor(turn) {
     if (turn == whiteTurn)
         return white;
     else
@@ -103,6 +103,17 @@ export function chessMakeMove(match, fromCoords, toCoords) {
         }
     }
 
+    // En passant capture
+    if ((piece & pawn) === pawn && toCoords.y !== fromCoords.y && fromCoords.x !== toCoords.x) {
+        const capturedPawnSquare = match.boardState[fromCoords.y][toCoords.x];
+        if (capturedPawnSquare === blank && match.lastMove) {
+            const lmPiece = match.lastMove.piece;
+            if ((lmPiece & pawn) === pawn) {
+                match.boardState[fromCoords.y][toCoords.x] = 0;
+            }
+        }
+    }
+
     // Pawn promotion: mark pending, don't change turn yet
     if (isWhitePawn && toCoords.y == 7) {
         match.pendingPromotion = { from: fromCoords, to: toCoords, color: white };
@@ -115,6 +126,7 @@ export function chessMakeMove(match, fromCoords, toCoords) {
     }
 
     match.turnState = 1 - match.turnState;
+    match.lastMove = { from: fromCoords, to: toCoords, piece: piece };
 };
 
 export function checkLegalMove(board, moveFromCoord, moveToCoord, turnOrMatch){
@@ -550,7 +562,7 @@ function genAllLegalMoves(board, color){
 }
 
 // Check if the king is currently in check on the given board for the given turn
-function isKingInCheck(board, turn) {
+export function isKingInCheck(board, turn) {
     let currColor = turnToColor(turn);
     let kingPos = Coord(0, 0);
     for (let i = 0; i < noOfSquares; i++) {
