@@ -469,16 +469,18 @@ function genAllMoves(board, color){
     return moves;
 }
 
-function genLegalMoves(board, position){
+function genLegalMoves(board, position, castlingRights){
     // if(!validBoard(board))
     //     return [];
     let moves = [];
     let value = board[position.y][position.x];
     // console.log(getColor(value));
+    let turn = colorToTurn(getColor(value));
+    let match = castlingRights ? { turnState: turn, castlingRights } : turn;
     for(let i = 0; i < noOfSquares; i++){
         for(let j = 0; j < noOfSquares; j++){
             let to = Coord(i, j);
-            if(checkLegalMove(board, position, to, colorToTurn(getColor(value)))){
+            if(checkLegalMove(board, position, to, match)){
                 moves.push(Move(position, to));
             }
         }

@@ -55,10 +55,12 @@ function recalcLayout() {
   offset_y = 10;
   side_len = total - offset_x * 2 - 10;
 
-  canvas.width = total;
-  canvas.height = total;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = total * dpr;
+  canvas.height = total * dpr;
   canvas.style.maxWidth = (vw - 8) + 'px';
   canvas.style.maxHeight = (vh * 0.7) + 'px';
+  ctx.scale(dpr, dpr);
 }
 
 const delta_time = 10;
@@ -76,7 +78,7 @@ let new_piece; // value of the piece being dragged to the square
 let is_being_validated = false;
 let can_move = false; // to disable dragging when it's not your turn
 let my_color = null;  // white or black
-let match_id = null;
+let matchId = null;
 
 // Click-to-move state
 let selectedSquare = null;        // {x, y} in visual coords or null
@@ -195,16 +197,16 @@ function draw() {
             }
             else
                 ctx.fillStyle = dark_square_color;
-            if(board.length != 0  && (board[j][i] & 0b10000) > 0){
+            if(board.length != 0  && (board[i][j] & 0b10000) > 0){
                 // console.log(i, j)
                 ctx.fillStyle = move_square_color;
             }
             // En passant target square indicator
-            if(board[j][i] & 0b1000000) {
+            if(board[i][j] & 0b1000000) {
                 ctx.fillStyle = '#ffcc44';
             }
             // Check indicator: red highlight on king's square
-            if (board[j][i] & 0b100000) {
+            if (board[i][j] & 0b100000) {
                 ctx.fillStyle = check_square_color;
             }
 
@@ -213,14 +215,14 @@ function draw() {
                 side_len_square, side_len_square);
 
             // Click-to-move: selected square highlight
-            if (selectedSquare && i === selectedSquare.x && j === selectedSquare.y) {
+            if (selectedSquare && j === selectedSquare.x && i === selectedSquare.y) {
                 ctx.globalAlpha = selected_square_opacity;
                 ctx.fillStyle = selected_square_color;
                 ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
                 ctx.globalAlpha = 1.0;
             }
             // Click-to-move: legal move indicators
-            if (legalMoveSquares.has(i + ',' + j)) {
+            if (legalMoveSquares.has(j + ',' + i)) {
                 ctx.globalAlpha = 0.3;
                 ctx.fillStyle = possible_move_color;
                 ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
@@ -268,7 +270,7 @@ function get_box_coords() {
 }
 
 function getVisualPieceColor(value) {
-    if ((value & 0b1111) === blank) return -1;
+    if ((value & 0b111) === blank) return -1;
     return (value & black) ? 1 : 0;
 }
 
@@ -280,7 +282,7 @@ function selectPiece(x, y) {
     legalMoveSquares.clear();
     let visualBoard = board;
     let pos = Coord(x, y);
-    let moves = genLegalMoves(visualBoard, pos);
+    let moves = genLegalMoves(visualBoard, pos, null); // castlingRights — TODO: receive from server
     for (let m of moves) {
         legalMoveSquares.add(m.to.x + ',' + m.to.y);
     }
@@ -293,10 +295,12 @@ function clearSelection() {
 }
 
 function sendMoveToServer(fromX, fromY, toX, toY) {
+    from_position = { x: fromX, y: fromY };
+    to_position = { x: toX, y: toY };
     if (my_color == 0) {
-        socket.emit('move', match_id, {x: fromX, y: fromY}, {x: toX, y: toY});
+        socket.emit('move', matchId, {x: fromX, y: fromY}, {x: toX, y: toY});
     } else {
-        socket.emit('move', match_id, {
+        socket.emit('move', matchId, {
                 x: no_of_squares - fromX - 1,
                 y: no_of_squares - fromY - 1
             }, {
@@ -349,8 +353,10 @@ function handle_drag() {
     }
 
     if(was_mouse_down == false && is_mouse_down == true){
-        from_position.x = curr_position.x;
-        from_position.y = curr_position.y;
+        if (can_move) {
+            from_position.x = curr_position.x;
+            from_position.y = curr_position.y;
+        }
     }
 
     // if mouse was released and the player was holding a piece
@@ -375,12 +381,12 @@ function handle_drag() {
         // send movement data to the server
         if (my_color == 0){
             // if(!coordEqual(from_position, to_position))
-            socket.emit('move', match_id, from_position, to_position);
+            socket.emit('move', matchId, from_position, to_position);
         }
         else
             // Black has the board in a different perspective so
             // adjust the coordinates accordingly
-            socket.emit('move', match_id, {
+            socket.emit('move', matchId, {
                     x : no_of_squares - from_position.x - 1 ,
                     y : no_of_squares - from_position.y - 1 
                 },
@@ -455,7 +461,7 @@ function display_possible_moves(){
     }
 
     // Get all the legal moves from the current held piece
-    let moves = genLegalMoves(new_board, new_from_position);
+    let moves = genLegalMoves(new_board, new_from_position, null); // castlingRights — TODO: receive from server
     // console.log(moves);
 
     // For every legal move draw a green circle indicating that
@@ -476,10 +482,12 @@ function display_possible_moves(){
 
 window.onload = () => {
     recalcLayout();
-    draw();
-    // Only set initial board if there's no saved session (reconnect will restore state)
+    // Only draw the initial board if there's no saved session.
+    // If reconnecting, skip draw() here and wait for the 'reconnected' event
+    // from the server, which will restore the real board state and call draw().
     const saved = loadSession();
     if (!saved) {
+        draw();
         fen_to_board(start_fen);
         render_board();
     }
@@ -523,6 +531,10 @@ canvas.ontouchstart = (e) => {
 canvas.ontouchend = (e) => {
     is_mouse_down = false;
     if (!isDragging && lastMouseDownPx && can_move) {
+        const touch = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        mouse_x = touch.clientX - rect.left;
+        mouse_y = touch.clientY - rect.top;
         let coords = get_box_coords();
         let i = coords[0], j = coords[1];
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
@@ -638,7 +650,7 @@ function showPromotionSelector(color) {
         btn.className = 'promotion-piece';
         btn.textContent = p.symbol;
         btn.onclick = () => {
-            socket.emit('promotion:choose', { gameId: match_id, pieceType: p.type });
+            socket.emit('promotion:choose', { gameId: matchId, pieceType: p.type });
             modal.style.display = 'none';
         };
         container.appendChild(btn);

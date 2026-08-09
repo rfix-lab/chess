@@ -11,6 +11,25 @@ import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToCo
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
 import { authenticateUser, signupUser } from './lib/auth.js';
 
+// Rate limiting: prevent clients from spamming socket events
+const rateLimits = new Map(); // socketId -> { move: 0, challenge: 0, takeback: 0, lastReset: timestamp }
+
+function isRateLimited(socket, event, windowMs, maxCount) {
+  const now = Date.now();
+  if (!rateLimits.has(socket.id)) {
+    rateLimits.set(socket.id, { [event]: 1, lastReset: now });
+    return false;
+  }
+  const limits = rateLimits.get(socket.id);
+  if (now - limits.lastReset > windowMs) {
+    limits[event] = 1;
+    limits.lastReset = now;
+    return false;
+  }
+  limits[event] = (limits[event] || 0) + 1;
+  return limits[event] > maxCount;
+}
+
 // express server
 const PORT = process.env.PORT || 5500;
 const app = express();
@@ -54,7 +73,18 @@ io.on('connection', socket => {
   // this route validates a move sent by a player
   socket.on('move', (matchId, fromCoords, toCoords) => {
     const match = matches[matchId];
-    if (!match || !match.player1Socket || !match.player2Socket) return;
+
+    // Rate limit: max 10 moves per second
+    if (isRateLimited(socket, 'move', 1000, 10)) {
+      return;
+    }
+    if (!match || !match.player1Socket || !match.player2Socket || match.gameEnded) return;
+
+    // Validate coordinates
+    if (!fromCoords || !toCoords || typeof fromCoords.x !== 'number' || typeof fromCoords.y !== 'number' ||
+        typeof toCoords.x !== 'number' || typeof toCoords.y !== 'number') {
+      return socket.emit('invalidMove', { reason: 'invalid coordinates' });
+    }
 
     // authenticating move
     let valid = checkLegalMove(
@@ -88,11 +118,12 @@ io.on('connection', socket => {
     const destPiece = match.boardState[toCoords.y][toCoords.x];
     const isPawn = getPiece(piece) === pawn;
     const isCapture = destPiece !== blank;
+    const isEnPassant = isPawn && toCoords.x !== fromCoords.x && destPiece === blank;
 
     chessMakeMove(match, fromCoords, toCoords);
 
     // Update halfMoveClock
-    if (isPawn || isCapture) {
+    if (isPawn || isCapture || isEnPassant) {
       match.halfMoveClock = 0;
     } else {
       match.halfMoveClock++;
@@ -232,6 +263,12 @@ io.on('connection', socket => {
       match.player2Socket = socket;
     }
 
+    // Cancel forfeit timer if reconnecting
+    if (match.disconnectTimers && match.disconnectTimers[socket.id]) {
+      clearTimeout(match.disconnectTimers[socket.id]);
+      delete match.disconnectTimers[socket.id];
+    }
+
     // Deep-copy board state to avoid move indicator bits
     const cleanBoard = match.boardState.map((arr) => arr.slice().map((v) => v & 0b01111));
 
@@ -282,7 +319,8 @@ io.on('connection', socket => {
     match.turnState = 1 - match.turnState;
 
     // Record the original pawn move in history (turn before flip)
-    match.moveHistory.push({ from: from, to: to, turn: color === white ? 0 : 1 });
+    // moveHistory already recorded in the 'move' handler (line ~103).
+    // Do NOT push here again — that was causing duplicate entries for promotion moves.
 
     const board = match.boardState.map((arr) => { return arr.slice(); });
     // En passant indicator after promotion (pawn moved 2 squares before promotion)
@@ -396,6 +434,11 @@ io.on('connection', socket => {
   // Challenge to resign
   socket.on('challenge', (matchId) => {
     const match = matches.find(m => m.matchId === matchId);
+
+    // Rate limit: max 3 challenges per 10 seconds
+    if (isRateLimited(socket, 'challenge', 10000, 3)) {
+      return;
+    }
     if (!match || match.gameEnded) return;
 
     if (match.challengeFrom === 'declined') return;
@@ -431,6 +474,11 @@ io.on('connection', socket => {
   // Takeback request
   socket.on('takebackRequest', (matchId) => {
     const match = matches.find(m => m.matchId === matchId);
+
+    // Rate limit: max 5 takeback requests per 10 seconds
+    if (isRateLimited(socket, 'takeback', 10000, 5)) {
+      return;
+    }
     if (!match || match.gameEnded) return;
     if (match.stateHistory.length === 0) return;
 
@@ -491,9 +539,26 @@ io.on('connection', socket => {
     }
   });
 
-  // thie route is fired when a socket disconnects
+  // this route is fired when a socket disconnects
   socket.on('disconnect', () => {
-    // console.log(`User[${socket.id}]: disconnected`);
+    const match = matches.find(m => m.player1Socket?.id === socket.id || m.player2Socket?.id === socket.id);
+    if (!match || match.gameEnded) return;
+
+    // Set 5-minute forfeit timer
+    const timer = setTimeout(() => {
+      if (match.gameEnded) return;
+      match.gameEnded = true;
+      const winnerSocket = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
+      if (winnerSocket) {
+        winnerSocket.emit('gameEnd', { reason: 'opponent_disconnect', result: 'win' });
+      }
+      // Clean up match from array
+      const idx = matches.indexOf(match);
+      if (idx !== -1) matches.splice(idx, 1);
+    }, 5 * 60 * 1000);
+
+    if (!match.disconnectTimers) match.disconnectTimers = {};
+    match.disconnectTimers[socket.id] = timer;
   });
 });
 

@@ -51,7 +51,7 @@ if (!tryReconnect()) {
 // Server tells us to start a new game (normal flow)
 socket.on('startGame', (color, gameId) => {
   my_color = color;
-  match_id = gameId;
+  matchId = gameId;
   saveSession(gameId, color);
   capturedByWhite = [];
   capturedByBlack = [];
@@ -78,7 +78,7 @@ socket.on('startGame', (color, gameId) => {
 socket.on('reconnected', (color, gameId, boardState, turnState) => {
   clearSession(); // no longer need to reconnect
   my_color = color;
-  match_id = gameId;
+  matchId = gameId;
   saveSession(gameId, color);
   capturedByWhite = [];
   capturedByBlack = [];
@@ -169,7 +169,7 @@ const btnResignConfirm = document.getElementById('btn-resign-confirm');
 if (btnResignConfirm) {
   btnResignConfirm.addEventListener('click', () => {
     document.getElementById('resignModal').style.display = 'none';
-    socket.emit('resign', match_id);
+    socket.emit('resign', matchId);
     gameIsOver = true;
     can_move = false;
     disableAllGameActions();
@@ -181,7 +181,7 @@ const btnOfferDraw = document.getElementById('btn-offer-draw');
 if (btnOfferDraw) {
   btnOfferDraw.addEventListener('click', () => {
     if (gameIsOver || drawOfferDeclined) return;
-    socket.emit('drawOffer', match_id);
+    socket.emit('drawOffer', matchId);
     btnOfferDraw.disabled = true;
     showToast('Draw offer sent');
   });
@@ -192,7 +192,7 @@ const btnChallenge = document.getElementById('btn-challenge');
 if (btnChallenge) {
   btnChallenge.addEventListener('click', () => {
     if (gameIsOver || challengeDeclined) return;
-    socket.emit('challenge', match_id);
+    socket.emit('challenge', matchId);
     btnChallenge.disabled = true;
     showToast('Challenge sent');
   });
@@ -210,7 +210,7 @@ const btnDrawAccept = document.getElementById('btn-draw-accept');
 if (btnDrawAccept) {
   btnDrawAccept.addEventListener('click', () => {
     document.getElementById('drawOfferModal').style.display = 'none';
-    socket.emit('drawResponse', match_id, true);
+    socket.emit('drawResponse', matchId, true);
     gameIsOver = true;
     can_move = false;
     disableAllGameActions();
@@ -222,7 +222,7 @@ const btnDrawDecline = document.getElementById('btn-draw-decline');
 if (btnDrawDecline) {
   btnDrawDecline.addEventListener('click', () => {
     document.getElementById('drawOfferModal').style.display = 'none';
-    socket.emit('drawResponse', match_id, false);
+    socket.emit('drawResponse', matchId, false);
   });
 }
 
@@ -244,7 +244,7 @@ const btnChallengeAccept = document.getElementById('btn-challenge-accept');
 if (btnChallengeAccept) {
   btnChallengeAccept.addEventListener('click', () => {
     document.getElementById('challengeModal').style.display = 'none';
-    socket.emit('challengeResponse', match_id, true);
+    socket.emit('challengeResponse', matchId, true);
     gameIsOver = true;
     can_move = false;
     disableAllGameActions();
@@ -256,7 +256,7 @@ const btnChallengeDecline = document.getElementById('btn-challenge-decline');
 if (btnChallengeDecline) {
   btnChallengeDecline.addEventListener('click', () => {
     document.getElementById('challengeModal').style.display = 'none';
-    socket.emit('challengeResponse', match_id, false);
+    socket.emit('challengeResponse', matchId, false);
   });
 }
 
@@ -282,13 +282,23 @@ socket.on('resignReceived', (data) => {
 
 // --- Incoming: Game end (agreement draw) ---
 socket.on('gameEnd', (data) => {
-  gameIsOver = true;
   can_move = false;
+  gameIsOver = true;
   clearSession();
   disableAllGameActions();
-  if (data.result === 'draw') {
-    document.getElementById('status').innerText = 'Draw by agreement! 🤝';
+  if (!data) {
+    document.getElementById('status').innerText = 'Game over';
+    return;
   }
+  const messages = {
+    'draw': 'Ничья! 🤝',
+    'win': 'Победа! 🎉',
+    'loss': 'Поражение 😞',
+    'timeout': 'Время вышло! ⏰',
+    'opponent_disconnect': 'Оппонент отключился — победа! 🎉',
+  };
+  document.getElementById('status').innerText = messages[data.result] || 'Game over';
+  is_being_validated = false;
 });
 
 // return from server on whether a move was validated or not
@@ -400,7 +410,7 @@ let takebackDeclined = false;
 if (btnTakeback) {
   btnTakeback.addEventListener('click', () => {
     if (gameIsOver || takebackDeclined) return;
-    socket.emit('takebackRequest', match_id);
+    socket.emit('takebackRequest', matchId);
     showToast('Takeback request sent');
   });
 }
@@ -417,7 +427,7 @@ const btnTakebackAccept = document.getElementById('btn-takeback-accept');
 if (btnTakebackAccept) {
   btnTakebackAccept.addEventListener('click', () => {
     document.getElementById('takebackOfferModal').style.display = 'none';
-    socket.emit('takebackResponse', match_id, true);
+    socket.emit('takebackResponse', matchId, true);
   });
 }
 
@@ -426,7 +436,7 @@ const btnTakebackDecline = document.getElementById('btn-takeback-decline');
 if (btnTakebackDecline) {
   btnTakebackDecline.addEventListener('click', () => {
     document.getElementById('takebackOfferModal').style.display = 'none';
-    socket.emit('takebackResponse', match_id, false);
+    socket.emit('takebackResponse', matchId, false);
   });
 }
 
@@ -466,4 +476,15 @@ socket.on('takebackError', (msg) => {
 socket.on('repetitionWarning', (data) => {
   document.getElementById('repetitionWarningText').innerText = data.patternDescription;
   document.getElementById('repetitionWarningModal').style.display = 'block';
+});
+
+// --- Socket disconnect / error — unlock move validation ---
+socket.on('disconnect', () => {
+  is_being_validated = false;
+});
+socket.on('connect_error', () => {
+  is_being_validated = false;
+});
+socket.on('reconnect_failed', () => {
+  is_being_validated = false;
 });
