@@ -1,0 +1,41 @@
+Status: FIXED ✓ VERIFIED OK
+
+Status: FIXED
+Fix: added `match.gameEnded = true` before all automatic game-end emits (lines 176, 188, 196, 203, 207 in `move` handler; lines 358, 370, 378, 386, 390 in `promotion:choose` handler). Verified by syntax check and code inspection.
+---
+
+Title: match.gameEnded never set on checkmate, stalemate, or automatic draws
+File: src/index.js
+Line: 180-211, 376-382
+Severity: critical
+Type: логический баг
+
+Description:
+После обнаружения мата, патовой позиции, ничьей от трёхкратного повторения, недостаточного материала или правила 50 ходов, сервер НЕ устанавливает `match.gameEnded = true`. Гвард в обработчике `move` (`if (!match || match.gameEnded) return;` на строке 81) не сработает, и игроки смогут продолжать отправлять ходы после окончания партии.
+
+Проблема в двух местах:
+
+1. Обработчик `move` (строки 180-211): после `checkThreefoldDraw`, `isInsufficientMaterial`, `isFiftyMoveRule`, `isGameEndReason` — сервер отправляет события `draw`/`checkMate`/`stalemate` и делает `return`, но НЕ устанавливает `match.gameEnded = true`.
+
+2. Обработчик `promotion:choose` (строки 376-382): после завершения промосции, сервер проверяет endReason и отправляет `checkMate`/`stalemate`, но также не устанавливает `gameEnded`.
+
+Остальные обработчики (drawOffer accept, resign, takeback accept, disconnect) правильно устанавливают `gameEnded = true`. Только автоматическое определение конца игры — нет.
+
+Why it matters:
+Игроки могут делать ходы после окончания партии. Сервер продолжит обновлять boardState, что приведёт к невалидному состоянию. Матч не будет корректно завершён для матчмейкинга.
+
+Affected code:
+```
+// src/index.js, lines 198-211 (обработчик 'move')
+    const endReason = isGameEndReason(match.boardState, match.turnState);
+    if (endReason === 'checkmate') {
+      match.player1Socket.emit('checkMate', match.turnState);  // ← нет match.gameEnded = true
+      match.player2Socket.emit('checkMate', match.turnState);
+    } else if (endReason === 'stalemate') {
+      match.player1Socket.emit('stalemate');  // ← нет match.gameEnded = true
+      match.player2Socket.emit('stalemate');
+    }
+
+// Аналогично для draw (threefold/insufficient/fifty) на строках 176-187, 192-195, 199-202
+// И аналогично в 'promotion:choose' на строках 376-382
+```

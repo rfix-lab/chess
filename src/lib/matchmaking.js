@@ -66,7 +66,7 @@ export function findMatch(playerSocket) {
 export function findPrivateMatch(playerSocket, matchId) {
   for(let match of matches) {
     if (match.matchId === matchId && match.private) {
-      if (match.player1Socket) {
+      if (match.player1Socket && match.player1Socket.connected) {
         match.player2Socket = playerSocket;
         startMatch(matchId);
         return 1;

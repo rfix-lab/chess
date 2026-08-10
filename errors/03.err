@@ -1,0 +1,29 @@
+Status: FIXED ✓ VERIFIED OK
+
+Title: Клиентская валидация en passant не проверяет двойной ход пешки
+File: src/public/js/chessutils.js
+Line: 190-196, 223-227
+Severity: major
+Type: логический баг
+
+Description:
+Клиентская валидация en passant проверяет только наличие пешки соседа, но не проверяет, что эта пешка СДЕЛАЛА двойной ход на предыдущем ходу. В отличие от серверной версии, которая использует `_wasPawnDoublePush()` для проверки через `match.lastMove`, клиентская версия разрешает en passant в любой момент, пока рядом стоит вражеская пешка.
+
+Это влияет на `genLegalMoves`, который используется для подсветки возможных ходов (click-to-move) в `game.js` (строка 285).
+
+Why it matters:
+Неправильная подсветка легальных ходов: клиент покажет en passant как возможный ход даже когда это правило не применяется. Это не ломает сервер (сервер всё равно отклонит нелегальный ход), но создаёт путаницу в UI — подсветка ходов показывает нелегальный ход.
+
+Affected code:
+```
+// src/public/js/chessutils.js, lines 190-196 (white pawn)
+    if (differenceX == 1 && destValue == blank) {
+        // En passant: check if adjacent enemy pawn moved 2 squares
+        if (moveToCoord.y == moveFromCoord.y - 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == black) {
+          return true;  // ← No check that the pawn JUST moved 2 squares!
+        }
+        return false;
+    }
+
+// Аналогично для black pawn, lines 223-227
+```

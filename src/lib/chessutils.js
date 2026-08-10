@@ -5,9 +5,13 @@ const noOfSquares = 8;
 const whiteTurn = 0;
 const blackTurn = 1;
 
-export const blank = 0b0000;
-export const white = 0b0000;
+export const blank = 0;
+export const white = 0;
 export const black = 0b1000;
+
+// IMPORTANT: blank and white both have value 0. A white piece is encoded as
+// (white | pieceType) = pieceType (non-zero). A blank square is exactly 0.
+// getColor() handles this correctly by checking value == 0 first.
 
 export const pawn = 0b0001;
 export const king = 0b0010;
@@ -70,7 +74,7 @@ export function chessMakeMove(match, fromCoords, toCoords) {
 
     // Castling: move the rook
     const dx = toCoords.x - fromCoords.x;
-    if (Math.abs(dx) === 2 && (match.boardState[toCoords.y][toCoords.x] & king) === king) {
+    if (Math.abs(dx) === 2 && getPiece(match.boardState[toCoords.y][toCoords.x]) === king) {
         if (dx === 2) {
             // King-side: rook from x=7 to x=5
             match.boardState[toCoords.y][5] = match.boardState[toCoords.y][7];
@@ -85,7 +89,7 @@ export function chessMakeMove(match, fromCoords, toCoords) {
     // Strip castling rights when king or rook moves
     if (match.castlingRights) {
         const moved = match.boardState[toCoords.y][toCoords.x];
-        if ((moved & king) === king) {
+        if (getPiece(moved) === king) {
             // King moved — strip both sides for this color
             if (match.turnState === whiteTurn) {
                 match.castlingRights.whiteKingSide = false;
@@ -95,19 +99,19 @@ export function chessMakeMove(match, fromCoords, toCoords) {
                 match.castlingRights.blackQueenSide = false;
             }
         }
-        if ((moved & rook) === rook) {
+        if (getPiece(moved) === rook) {
             // Rook moved from starting square
-            if (fromCoords.x === 7 && fromCoords.y === 0) match.castlingRights.whiteKingSide = false;
-            if (fromCoords.x === 0 && fromCoords.y === 0) match.castlingRights.whiteQueenSide = false;
-            if (fromCoords.x === 7 && fromCoords.y === 7) match.castlingRights.blackKingSide = false;
-            if (fromCoords.x === 0 && fromCoords.y === 7) match.castlingRights.blackQueenSide = false;
+            if (fromCoords.x === 7 && fromCoords.y === 7) match.castlingRights.whiteKingSide = false;
+            if (fromCoords.x === 0 && fromCoords.y === 7) match.castlingRights.whiteQueenSide = false;
+            if (fromCoords.x === 7 && fromCoords.y === 0) match.castlingRights.blackKingSide = false;
+            if (fromCoords.x === 0 && fromCoords.y === 0) match.castlingRights.blackQueenSide = false;
         }
     }
 
     // En passant capture: pawn moves diagonally to an EMPTY square
     // (normal diagonal capture already handled by moving the pawn above).
     // Remove the captured pawn on the same row as the moving pawn.
-    if ((piece & pawn) === pawn && fromCoords.x !== toCoords.x && destPiece === blank) {
+    if (getPiece(piece) === pawn && fromCoords.x !== toCoords.x && destPiece === blank) {
         match.boardState[fromCoords.y][toCoords.x] = 0; // remove captured pawn
     }
 
@@ -177,7 +181,7 @@ export function chessMoveValidate(board, moveFromCoord, moveToCoord, turn, match
     // in a non-blocking board
     switch (piece) {
         case pawn: valid = valid && pawnMoveValidate(board,
-            moveFromCoord, moveToCoord, turn);
+            moveFromCoord, moveToCoord, turn, match);
             break;
         case knight: valid = valid && knightMoveValidate(board,
             moveFromCoord, moveToCoord, turn);
@@ -204,8 +208,27 @@ export function chessMoveValidate(board, moveFromCoord, moveToCoord, turn, match
 
 function checkCheck(board, moveFromCoord, moveToCoord, turn){
     let newBoard = board.map((arr)=>{return arr.slice();});
-    newBoard[moveToCoord.y][moveToCoord.x] = newBoard[moveFromCoord.y][moveFromCoord.x];
+    let piece = newBoard[moveFromCoord.y][moveFromCoord.x];
+    newBoard[moveToCoord.y][moveToCoord.x] = piece;
     newBoard[moveFromCoord.y][moveFromCoord.x] = blank;
+
+    // Handle castling: also move the rook in the simulated board
+    const dx = moveToCoord.x - moveFromCoord.x;
+    if (Math.abs(dx) === 2 && getPiece(piece) === king) {
+        if (dx === 2) {
+            newBoard[moveToCoord.y][5] = newBoard[moveToCoord.y][7];
+            newBoard[moveToCoord.y][7] = blank;
+        } else if (dx === -2) {
+            newBoard[moveToCoord.y][3] = newBoard[moveToCoord.y][0];
+            newBoard[moveToCoord.y][0] = blank;
+        }
+    }
+
+    // Handle en passant capture: remove the captured pawn
+    if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x) {
+        newBoard[moveFromCoord.y][moveToCoord.x] = blank;
+    }
+
     let currColor = turnToColor(turn);
     let kingPos = Coord(0, 0);
     for(let i = 0; i < noOfSquares; i++){
@@ -249,15 +272,28 @@ function validBoard(board){
     return board.length == noOfSquares && board[0].length == noOfSquares;
 }
 
-function pawnMoveValidate(board, moveFromCoord, moveToCoord, turn) {
+function pawnMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
     if (turn == whiteTurn)
-        return whitePawnMoveValidate(board, moveFromCoord, moveToCoord);
+        return whitePawnMoveValidate(board, moveFromCoord, moveToCoord, match);
     else
-        return blackPawnMoveValidate(board, moveFromCoord, moveToCoord);
+        return blackPawnMoveValidate(board, moveFromCoord, moveToCoord, match);
 
 }
 
-function whitePawnMoveValidate(board, moveFromCoord, moveToCoord) {
+// Check if the adjacent pawn at (row, col) just made a double push
+// This is needed for en passant - it must be done immediately
+function _wasPawnDoublePush(match, row, col, pawnColor) {
+    if (!match || !match.lastMove) return false;
+    const lm = match.lastMove;
+    // Check if the last move was a pawn double push to the target square
+    if (getPiece(lm.piece) !== pawn || getColor(lm.piece) !== pawnColor) return false;
+    if (lm.to.x !== col || lm.to.y !== row) return false;
+    // Verify it was a double push (2 squares vertically)
+    if (Math.abs(lm.to.y - lm.from.y) !== 2) return false;
+    return true;
+}
+
+function whitePawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
 
     let destValue = board[moveToCoord.y][moveToCoord.x];
 
@@ -288,8 +324,10 @@ function whitePawnMoveValidate(board, moveFromCoord, moveToCoord) {
 
     // can move diagonally only during captures
     if (differenceX == 1 && destValue == blank) {
-        // En passant: check if adjacent enemy pawn moved 2 squares
-        if (moveToCoord.y == moveFromCoord.y - 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == black) {
+        // En passant: only allowed if the adjacent enemy pawn just moved 2 squares
+        if (moveToCoord.y == moveFromCoord.y - 1
+            && board[moveFromCoord.y][moveToCoord.x] === (black | pawn)
+            && _wasPawnDoublePush(match, moveFromCoord.y, moveToCoord.x, black)) {
           return true;
         }
         // console.log('Chess Error: cant move diagonally without enemy');
@@ -299,7 +337,7 @@ function whitePawnMoveValidate(board, moveFromCoord, moveToCoord) {
     return true;
 }
 
-function blackPawnMoveValidate(board, moveFromCoord, moveToCoord) {
+function blackPawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
     let destValue = board[moveToCoord.y][moveToCoord.x];
 
     // cannot capture own pieces
@@ -331,8 +369,10 @@ function blackPawnMoveValidate(board, moveFromCoord, moveToCoord) {
 
     // can move diagonally only during captures
     if (differenceX == 1 && destValue == blank) {
-        // En passant: check if adjacent enemy pawn moved 2 squares
-        if (moveToCoord.y == moveFromCoord.y + 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == white) {
+        // En passant: only allowed if the adjacent enemy pawn just moved 2 squares
+        if (moveToCoord.y == moveFromCoord.y + 1
+            && board[moveFromCoord.y][moveToCoord.x] === (white | pawn)
+            && _wasPawnDoublePush(match, moveFromCoord.y, moveToCoord.x, white)) {
           return true;
         }
         return false;
@@ -454,7 +494,7 @@ function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
 
     // Castling: king moves 2 squares horizontally on the same row
     if (Math.abs(moveToCoord.x - moveFromCoord.x) === 2 && moveToCoord.y === moveFromCoord.y && match) {
-        const kingRow = turn === whiteTurn ? 0 : 7;
+        const kingRow = turn === whiteTurn ? 7 : 0;
         if (moveFromCoord.y !== kingRow || moveFromCoord.x !== 4) return false;
         if (isKingInCheck(board, turn)) return false;
 
@@ -470,7 +510,7 @@ function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
 
         // Path must be clear
         if (dx === 2) {
-            if (board[kingRow][6] !== blank || board[kingRow][7] !== blank) return false;
+            if (board[kingRow][5] !== blank || board[kingRow][6] !== blank) return false;
             if ((board[kingRow][7] & 0b0111) !== rook) return false;
         } else {
             if (board[kingRow][1] !== blank || board[kingRow][2] !== blank || board[kingRow][3] !== blank) return false;

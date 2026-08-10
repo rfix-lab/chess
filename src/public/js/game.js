@@ -82,6 +82,7 @@ let matchId = null;
 
 // Click-to-move state
 let selectedSquare = null;        // {x, y} in visual coords or null
+let lastMove = null;              // {from: {x,y}, to: {x,y}, piece} in server coords
 let lastMouseDownPx = null;       // {x, y} pixel coords for click vs drag detection
 let isDragging = false;           // true if mouse moved significantly after mousedown
 let legalMoveSquares = new Set(); // "x,y" keys of legal move targets (visual coords)
@@ -282,7 +283,7 @@ function selectPiece(x, y) {
     legalMoveSquares.clear();
     let visualBoard = board;
     let pos = Coord(x, y);
-    let moves = genLegalMoves(visualBoard, pos, null); // castlingRights — TODO: receive from server
+    let moves = genLegalMoves(visualBoard, pos, null, lastMove);
     for (let m of moves) {
         legalMoveSquares.add(m.to.x + ',' + m.to.y);
     }
@@ -297,6 +298,19 @@ function clearSelection() {
 function sendMoveToServer(fromX, fromY, toX, toY) {
     from_position = { x: fromX, y: fromY };
     to_position = { x: toX, y: toY };
+
+    // Capture piece and server-side coords for lastMove tracking
+    let visualPiece = board[fromY][fromX];
+    let serverFrom, serverTo;
+    if (my_color == 0) {
+        serverFrom = { x: fromX, y: fromY };
+        serverTo = { x: toX, y: toY };
+    } else {
+        serverFrom = { x: no_of_squares - fromX - 1, y: no_of_squares - fromY - 1 };
+        serverTo = { x: no_of_squares - toX - 1, y: no_of_squares - toY - 1 };
+    }
+    lastMove = { from: serverFrom, to: serverTo, piece: visualPiece };
+
     if (my_color == 0) {
         socket.emit('move', matchId, {x: fromX, y: fromY}, {x: toX, y: toY});
     } else {
@@ -461,7 +475,7 @@ function display_possible_moves(){
     }
 
     // Get all the legal moves from the current held piece
-    let moves = genLegalMoves(new_board, new_from_position, null); // castlingRights — TODO: receive from server
+    let moves = genLegalMoves(new_board, new_from_position, null, lastMove);
     // console.log(moves);
 
     // For every legal move draw a green circle indicating that

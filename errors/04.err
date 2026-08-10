@@ -1,0 +1,23 @@
+Status: FIXED ✓ VERIFIED OK
+Title: Клиентская рокировка: kingRow инвертирован (white=0, black=7 вместо white=7, black=0)
+File: src/public/js/chessutils.js
+Line: 393
+Severity: critical
+Type: логический баг
+
+Description:
+В клиентской `kingMoveValidate`, строка 393: `const kingRow = turn === whiteTurn ? 0 : 7;` — это задает `kingRow = 0` для белых и `kingRow = 7` для черных. Но в FEN и начальной расстановке белые стоят на строке y=7, а черные на y=0. На сервере (src/lib/chessutils.js, строка 497) правильно: `const kingRow = turn === whiteTurn ? 7 : 0;`.
+
+Из-за этого клиентская валидация рокировки для белых проверяет строку y=0 (где стоят черные фигуры), и для черных — строку y=7 (где стоят белые фигуры). Рокировка никогда не пройдет клиентскую проверку `genLegalMoves`.
+
+Why it matters:
+Рокировка полностью не работает на клиенте: подсветка легальных ходов не покажет рокировку, и клик-ту-мouv не позволит сделать рокировку. На сервере рокировка работает правильно, но клиент не покажет её как возможный ход.
+
+Affected code:
+```
+// src/public/js/chessutils.js, line 393
+  const kingRow = turn === whiteTurn ? 0 : 7;  // ← swapped! white should be 7, black should be 0
+
+// Правильно (сервер, src/lib/chessutils.js, line 497):
+  const kingRow = turn === whiteTurn ? 7 : 0;
+```

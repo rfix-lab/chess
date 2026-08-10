@@ -1,0 +1,23 @@
+Status: FIXED ✓ VERIFIED OK
+
+Title: XSS через неэкранированный matchId в EJS шаблоне
+File: src/views/game.ejs
+Line: 13
+Severity: major
+Type: security
+
+Description:
+`matchId` из URL подставляется в EJS шаблон без экранирования: `let matchId = "<%= matchId %>";`. EJS использует `<%=` для unescaped вывода. Если злоумышленник передаст `matchId=<script>alert(1)</script>`, это будет исполнено как JavaScript при загрузке страницы.
+
+`matchId` передается как query parameter (`/game?matchId=...`), что позволяет создать вредоносную ссылку.
+
+Why it matters:
+Злоумышленник может создать ссылку типа `https://site.com/game?matchId=<script>steal(document.cookie)</script>` и отправить её игроку. При переходе по ссылке код выполнится в контексте жертвы, позволяя украсть cookie с sessionID.
+
+Affected code:
+```
+<!-- src/views/game.ejs, line 13 -->
+<script>
+  let matchId = "<%= matchId %>";  // ← unescaped, XSS vector
+</script>
+```

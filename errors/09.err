@@ -1,0 +1,38 @@
+Status: FIXED ✓ VERIFIED OK
+Title: Клиентская checkCheck() не симулирует перемещение ладьи при рокировке и захват пешки при en passant
+File: src/public/js/chessutils.js
+Line: 127-150
+Severity: major
+Type: логический баг
+
+Description:
+Клиентская функция `checkCheck` создает копию доски и перемещает только одну фигуру. Она НЕ симулирует:
+1. Перемещение ладьи при рокировке (король двигается на 2 клетки → ладья тоже должна переместиться)
+2. Удаление захваченной пешки при en passant
+
+Серверная версия `checkCheck` (src/lib/chessutils.js, строки 218-228) правильно обрабатывает оба случая. Клиентская — нет.
+
+Это влияет на `genLegalMoves`, которая использует `checkLegalMove` → `checkCheck`. Подсветка легальных ходов будет неправильно обрабатывать рокировку и en passant: может показывать рокировку как ход, оставляющий короля под шахом (когда это не так), или блокировать легальный en passant.
+
+Why it matters:
+Некорректная подсветка возможных ходов для рокировки и en passant в режиме click-to-move. В сочетании с ошибкой #4 (inverted kingRow) и #8 (no castlingRights), рокировка и en passant практически не работают в клиентской валидации.
+
+Affected code:
+```
+// src/public/js/chessutils.js, lines 127-144
+function checkCheck(board, moveFromCoord, moveToCoord, turn){
+    let newBoard = board.map((arr)=>{return arr.slice();});
+    newBoard[moveToCoord.y][moveToCoord.x] = newBoard[moveFromCoord.y][moveFromCoord.x];
+    newBoard[moveFromCoord.y][moveFromCoord.x] = blank;
+    // ← MISSING: castling rook simulation
+    // ← MISSING: en passant captured pawn removal
+    ...
+}
+
+// Server correctly handles both (src/lib/chessutils.js, lines 218-228):
+    // Handle castling: also move the rook in the simulated board
+    const dx = moveToCoord.x - moveFromCoord.x;
+    if (Math.abs(dx) === 2 && getPiece(piece) === king) { ... }
+    // Handle en passant capture: remove the captured pawn
+    if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x) { ... }
+```

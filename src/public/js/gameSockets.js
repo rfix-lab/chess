@@ -370,7 +370,7 @@ socket.on('checkMate', turn => {
   legalMoveSquares.clear();
   clearSession();
   disableAllGameActions();
-  if(my_color == turnToColor(turn)){
+  if(my_color == turn){
     document.getElementById('status').innerText = 'Check Mate you lost! 😢';
   }
   else

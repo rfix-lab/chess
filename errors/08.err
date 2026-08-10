@@ -1,0 +1,42 @@
+Status: FIXED ✓ VERIFIED OK
+
+Title: Клиентская подсветка ходов не поддерживает рокировку (null castlingRights + инвертированный kingRow)
+File: src/public/js/chessutils.js, src/public/js/game.js
+Line: 285, 472-487
+Severity: major
+Type: логический баг
+
+Description:
+Функция `genLegalMoves` на клиенте используется для подсветки возможных ходов в режиме click-to-move. Она принимает `castlingRights` как параметр, но в `game.js` (строка 285) всегда передаётся `null`:
+```
+let moves = genLegalMoves(visualBoard, pos, null); // castlingRights — TODO: receive from server
+```
+
+Из-за этого `genLegalMoves` создаёт `match = turn` (число) вместо объекта с `castlingRights`. `checkLegalMove` → `chessMoveValidate` → `kingMoveValidate` ожидает `match` как объект с `castlingRights`. Рокировка никогда не пройдет проверку.
+
+В сочетании с ошибкой #4 (инвертированный `kingRow`), рокировка полностью отсутствует в клиентской валидации.
+
+Why it matters:
+Клиентская подсветка возможных ходов (click-to-move) никогда не покажет рокировку как возможный ход. В режиме click-to-move игрок не сможет сделать рокировку кликом. В ручном режиме (drag & drop) рокировка работает (сервер принимает), но подсветка не покажет её.
+
+Affected code:
+```
+// src/public/js/game.js, line 285
+    let moves = genLegalMoves(visualBoard, pos, null); // castlingRights — TODO: receive from server
+
+// src/public/js/chessutils.js, lines 472-487
+function genLegalMoves(board, position, castlingRights){
+    ...
+    let turn = colorToTurn(getColor(value));
+    let match = castlingRights ? { turnState: turn, castlingRights } : turn;  // ← when null, match = number
+    for(let i = 0; i < noOfSquares; i++){
+        for(let j = 0; j < noOfSquares; j++){
+            let to = Coord(i, j);
+            if(checkLegalMove(board, position, to, match)){  // ← castling never works
+                moves.push(Move(position, to));
+            }
+        }
+    }
+    return moves;
+}
+```

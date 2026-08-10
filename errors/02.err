@@ -1,0 +1,33 @@
+Status: VERIFIED OK
+Title: matches[matchId] — индексный доступ ломается после splice
+File: src/index.js
+Line: 76
+Severity: critical
+Type: crash
+
+Description:
+Обработчик `move` использует `matches[matchId]` — прямой доступ по индексу массива. `matchId` назначается как `matches.length` в момент создания (initMatch). Когда партия удаляется через `matches.splice(idx, 1)` (таймер отключения, строка 554), все последующие индексы сдвигаются. `matches[matchId]` вернёт чужую партию или undefined.
+
+Остальные обработчики (drawOffer, resign, challenge, takeback, promotion:choose, drawResponse) правильно используют `matches.find(m => m.matchId === ...)`. Только `move` уязвим.
+
+Why it matters:
+После отключения любого игрока (и удаления его партии через splice), все остальные `move` события с большим matchId будут обращаться к неправильным партиям. Это вызывает:
+- Ходы применяются в чужую партию
+- `undefined` access → crash если matchId больше длины массива
+- Рассинхронизация состояния между игроками
+
+Affected code:
+```
+// src/index.js, line 76
+  socket.on('move', (matchId, fromCoords, toCoords) => {
+    const match = matches[matchId];  // ← индексный доступ, ломается после splice
+    ...
+  });
+
+// src/index.js, line 554 (удаляет матч, сдвигает индексы)
+      const idx = matches.indexOf(match);
+      if (idx !== -1) matches.splice(idx, 1);
+
+// Правильный стиль (используется в других обработчиках):
+    const match = matches.find(m => m.matchId === matchId);
+```

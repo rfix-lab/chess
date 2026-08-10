@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="styles/game.css">
   <script src="/socket.io/socket.io.js"></script>
   <script>
-    let matchId = "<%= matchId %>";
+    let matchId = <%- JSON.stringify(matchId) %>;
   </script>
 </head>
 

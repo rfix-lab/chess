@@ -1,0 +1,34 @@
+Status: FIXED ✓ VERIFIED OK
+
+Status: FIXED ✓ VERIFIED OK
+Title: turnToColor() возвращает 0b1000 для чёрных, my_color равен 1 — сравнение всегда false для чёрных
+File: src/public/js/gameSockets.js
+Line: 373
+Severity: critical
+Type: логический баг
+
+Description:
+На строке 373: `if(my_color == turnToColor(turn))`. `turnToColor(0)` возвращает `white` (=0), `turnToColor(1)` возвращает `black` (=0b1000). `my_color` принимает значения 0 или 1 (от сервера через `startGame`).
+
+Результат сравнения:
+- Белый игрок проиграл: `my_color=0`, `turnToColor(0)=0` → 0==0 → true → "you lost!" ✓
+- Чёрный игрок проиграл: `my_color=1`, `turnToColor(1)=0b1000` → 1==0b1000 → false → "you Won!" ✗
+- Если `turn` — это чей-то ход, когда мат наступил: для чёрных условие ВСЕГДА false.
+
+Для чёрного игрока сообщение о мате всегда покажет "Check Mate you Won!", даже если он проиграл.
+
+Why it matters:
+Чёрный игрок всегда видит "победу" при мате, независимо от реального результата. Это путающее сообщение, которое ломает UX и неправильно отображает результат игры.
+
+Affected code:
+```
+// src/public/js/gameSockets.js, line 373
+  if(my_color == turnToColor(turn)){
+    document.getElementById('status').innerText = 'Check Mate you lost! 😢';
+  }
+  else
+    document.getElementById('status').innerText = 'Check Mate you Won! 🎉';
+
+// turnToColor(0) → 0 (white). my_color=0 → 0==0 ✓ (correct for white)
+// turnToColor(1) → 0b1000 (black). my_color=1 → 1==0b1000 ✗ (always wrong for black)
+```

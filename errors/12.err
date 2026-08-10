@@ -1,0 +1,31 @@
+Status: FIXED ✓ VERIFIED OK
+Title: Утечка памяти — rateLimits Map не очищается при отключении сокета
+File: src/index.js
+Line: 14, 22-32, 542-561
+Severity: minor
+Type: memory leak
+
+Description:
+`rateLimits` Map (строка 14) сохраняет данные для каждого подключенного сокета по `socket.id`. При отключении игрока (обработчик `disconnect`, строка 542) запись в `rateLimits` не удаляется. Map растет неограниченно при каждом reconnect.
+
+Why it matters:
+При длительной работе сервера с частыми reconnects, Map `rateLimits` будет содержать записи для давно отключенных сокетов. Память будет расти, хотя эффект не критичен при малом трафике.
+
+Affected code:
+```
+// src/index.js, line 14
+const rateLimits = new Map();
+
+// Lines 22-32: data is added
+function isRateLimited(socket, event, windowMs, maxCount) {
+  if (!rateLimits.has(socket.id)) {
+    rateLimits.set(socket.id, { [event]: 1, lastReset: now });
+    ...
+
+// Line 542-561: disconnect handler — no cleanup
+  socket.on('disconnect', () => {
+    const match = matches.find(m => m.player1Socket?.id === socket.id || m.player2Socket?.id === socket.id);
+    ...
+    // ← rateLimits.delete(socket.id) is missing
+  });
+```

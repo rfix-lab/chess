@@ -1,0 +1,18 @@
+Status: FIXED ✓ VERIFIED OK
+Title: Поле пароля отображает текст открыто (type="text" вместо type="password")
+File: src/views/index.ejs
+Line: 23
+Severity: minor
+Type: ui
+
+Description:
+Поле ввода пароля на странице входа/регистрации имеет `type="text"` вместо `type="password"`. Пароль отображается как обычный текст, виден окружающим.
+
+Why it matters:
+Пользователи могут случайно скомпрометировать свой пароль на общественных компьютерах или при наличии плеча (shoulder surfing). Базовый UX стандарт — пароли должны быть маскированы.
+
+Affected code:
+```
+<!-- src/views/index.ejs, line 23 -->
+<input type="text" name="password" id="password">  <!-- ← should be type="password" -->
+```

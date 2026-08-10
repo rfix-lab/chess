@@ -2,3 +2,13 @@ node_modules/
 Dockerfile
 docker-compose.yml
 tune/
+
+# Debug scripts
+debug-*.mjs
+castling-trace.mjs
+check-check-debug.mjs
+trace-*.mjs
+test-*.mjs
+
+# Backups
+*.bak

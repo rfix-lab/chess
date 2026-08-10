@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
-import { authenticateUser, signupUser } from './lib/auth.js';
+import { authenticateUser, signupUser, validateSession } from './lib/auth.js';
 
 // Rate limiting: prevent clients from spamming socket events
 const rateLimits = new Map(); // socketId -> { move: 0, challenge: 0, takeback: 0, lastReset: timestamp }
@@ -63,6 +63,10 @@ app.get('/index', (req, res) => {
 
 app.get('/game', (req, res) => {
   let matchId = req.query.matchId;
+  // Validate matchId is a non-negative integer to prevent XSS
+  if (matchId !== undefined && matchId !== '' && (!Number.isInteger(Number(matchId)) || Number(matchId) < 0)) {
+    return res.status(400).send('Invalid matchId');
+  }
   res.render('game', {
     matchId: matchId ?? ""
   });
@@ -72,7 +76,7 @@ app.get('/game', (req, res) => {
 io.on('connection', socket => {
   // this route validates a move sent by a player
   socket.on('move', (matchId, fromCoords, toCoords) => {
-    const match = matches[matchId];
+    const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 10 moves per second
     if (isRateLimited(socket, 'move', 1000, 10)) {
@@ -173,6 +177,7 @@ io.on('connection', socket => {
     // Check threefold repetition
     const threefold = checkThreefoldDraw(match);
     if (threefold.draw) {
+      match.gameEnded = true;
       match.player1Socket.emit('draw', { reason: 'threefold' });
       match.player2Socket.emit('draw', { reason: 'threefold' });
       return;
@@ -184,6 +189,7 @@ io.on('connection', socket => {
 
     // Check insufficient material
     if (isInsufficientMaterial(match.boardState)) {
+      match.gameEnded = true;
       match.player1Socket.emit('draw', { reason: 'insufficient' });
       match.player2Socket.emit('draw', { reason: 'insufficient' });
       return;
@@ -191,23 +197,26 @@ io.on('connection', socket => {
 
     // Check 50-move rule
     if (isFiftyMoveRule(match.boardState, match.halfMoveClock)) {
+      match.gameEnded = true;
       match.player1Socket.emit('draw', { reason: 'fifty' });
       match.player2Socket.emit('draw', { reason: 'fifty' });
       return;
     }
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason === 'checkmate') {
+      match.gameEnded = true;
       match.player1Socket.emit('checkMate', match.turnState);
       match.player2Socket.emit('checkMate', match.turnState);
     } else if (endReason === 'stalemate') {
+      match.gameEnded = true;
       match.player1Socket.emit('stalemate');
       match.player2Socket.emit('stalemate');
     }
   });
 
   // this route signs in a user
-  socket.on('signin', ({ username, password }) => {
-    let [r, sessionID] = authenticateUser(users, username, password);
+  socket.on('signin', async ({ username, password }) => {
+    let [r, sessionID] = await authenticateUser(users, username, password);
     socket.emit('signin', r, sessionID);
   });
 
@@ -215,12 +224,18 @@ io.on('connection', socket => {
   socket.on('signup', ({ username, password }) => {
     // console.log(`User[${socket.id}]: signup with [${username}, ${password}]`);
 
-    let r = signupUser(users, username, password);
-    socket.emit('signup', r);
+    signupUser(users, username, password).then(r => {
+      socket.emit('signup', r);
+    });
   });
 
   // this route authenticates a user with a sessionID
   socket.on('auth', (sessionID, matchId) => {
+    if (!sessionID || !validateSession(users, sessionID)) {
+      socket.emit('authFailed');
+      return;
+    }
+
     if (matchId === null) {
       // regular match making
       findMatch(socket);
@@ -350,6 +365,7 @@ io.on('connection', socket => {
     // Check threefold repetition
     const threefold = checkThreefoldDraw(match);
     if (threefold.draw) {
+      match.gameEnded = true;
       socket.emit('draw', { reason: 'threefold' });
       if (opponent) opponent.emit('draw', { reason: 'threefold' });
       return;
@@ -361,6 +377,7 @@ io.on('connection', socket => {
 
     // Check insufficient material
     if (isInsufficientMaterial(match.boardState)) {
+      match.gameEnded = true;
       socket.emit('draw', { reason: 'insufficient' });
       if (opponent) opponent.emit('draw', { reason: 'insufficient' });
       return;
@@ -368,6 +385,7 @@ io.on('connection', socket => {
 
     // Check 50-move rule
     if (isFiftyMoveRule(match.boardState, match.halfMoveClock)) {
+      match.gameEnded = true;
       socket.emit('draw', { reason: 'fifty' });
       if (opponent) opponent.emit('draw', { reason: 'fifty' });
       return;
@@ -375,9 +393,11 @@ io.on('connection', socket => {
 
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason === 'checkmate') {
+      match.gameEnded = true;
       socket.emit('checkMate', match.turnState);
       if (opponent) opponent.emit('checkMate', match.turnState);
     } else if (endReason === 'stalemate') {
+      match.gameEnded = true;
       socket.emit('stalemate');
       if (opponent) opponent.emit('stalemate');
     }
@@ -541,6 +561,7 @@ io.on('connection', socket => {
 
   // this route is fired when a socket disconnects
   socket.on('disconnect', () => {
+    rateLimits.delete(socket.id);
     const match = matches.find(m => m.player1Socket?.id === socket.id || m.player2Socket?.id === socket.id);
     if (!match || match.gameEnded) return;
 
