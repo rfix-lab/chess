@@ -27,7 +27,7 @@ socket.on('signin', (valid, sessionID) => {
       psdDiv.classList.add('hide');
     }
 
-    successDiv.innerHTML = 'Logged in as ' + usernameInput.value;
+    successDiv.textContent = 'Logged in as ' + usernameInput.value;
     successDiv.classList.remove('hide');
     successDiv.classList.add('show');
 
