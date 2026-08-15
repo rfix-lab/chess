@@ -3,7 +3,7 @@
 **Дата:** 2026-08-15 09:05 MSK
 **Файл:** `src/public/js/chessutils.js` (client copy — only this file touched)
 **Эталон (НЕ трогал):** `src/lib/chessutils.js` (server, 732 lines, ES module)
-**Коммит:** (см. git log ниже — заполняется после коммита)
+**Коммит:** `bb03f8939571205f530d3d6973005f31743e031d` (short `bb03f89`)
 
 ## Что исправлено
 
