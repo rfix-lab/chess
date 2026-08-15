@@ -68,4 +68,7 @@ reconnect в умерший матч → gameNotFound). Третий аргум�
 5. Reconnect-сценарий (по коду): `endMatch` → `removeMatch` → матч удалён из `matches[]` → `socket.on('reconnect')` находит `!match` → `socket.emit('gameNotFound')` → корректное отклонение. Клиентский gap: `gameSockets.js` нет handler'а `gameNotFound` (не чистит localStorage) → зафиксировано как follow-up (C3).
 
 ## Git
+
+Коммит: `c163cfa` — fix: S2 — completed matches removed from matches[] (memory leak) + centralized endMatch
+Файлы: src/index.js, src/lib/matchmaking.js, checkpoints/06-s2-match-leak.md, checkpoints/verify-s2-leak.mjs, checkpoints/STATE.md
 (заполняется при коммите)
