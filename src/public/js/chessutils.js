@@ -119,7 +119,6 @@ function chessMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
             // console.log("ChessError: not a piece");
             break;
     }
-
     // console.log('Validator: Reached the end of validator::' + valid);
     return valid;
 }
@@ -146,6 +145,7 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
     if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x) {
         newBoard[moveFromCoord.y][moveToCoord.x] = blank;
     }
+
     let currColor = turnToColor(turn);
     let kingPos = Coord(0, 0);
     for(let i = 0; i < noOfSquares; i++){
@@ -159,7 +159,6 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
     }
     let moves = genAllMoves(newBoard, (black - currColor));
     for (let m of moves){
-        // console.log("Move to: ", m.to);
         if(coordEqual(m.to, kingPos)){
             return true;
         }
@@ -169,7 +168,7 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
 
 function checkLegalMove(board, moveFromCoord, moveToCoord, turnOrMatch){
     let turn, match;
-    if (typeof turnOrMatch === 'object' && turnOrMatch !== null && 'turnState' in turnOrMatch) {
+    if (typeof turnOrMatch === 'object' && turnOrMatch !== null && 'castlingRights' in turnOrMatch) {
       match = turnOrMatch;
       turn = match.turnState;
     } else {
@@ -203,22 +202,25 @@ function validBoard(board){
     return board.length == noOfSquares && board[0].length == noOfSquares;
 }
 
-// En passant helper: check if the opponent's pawn just made a double push to the given square
-function _wasPawnDoublePush(lastMove, row, col, pawnColor) {
-    if (!lastMove) return false;
-    const lm = lastMove;
-    if (getPiece(lm.piece) !== pawn || getColor(lm.piece) !== pawnColor) return false;
-    if (lm.to.x !== col || lm.to.y !== row) return false;
-    if (Math.abs(lm.to.y - lm.from.y) !== 2) return false;
-    return true;
-}
-
 function pawnMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
     if (turn == whiteTurn)
         return whitePawnMoveValidate(board, moveFromCoord, moveToCoord, match);
     else
         return blackPawnMoveValidate(board, moveFromCoord, moveToCoord, match);
 
+}
+
+// Check if the adjacent pawn at (row, col) just made a double push
+// This is needed for en passant - it must be done immediately
+function _wasPawnDoublePush(match, row, col, pawnColor) {
+    if (!match || !match.lastMove) return false;
+    const lm = match.lastMove;
+    // Check if the last move was a pawn double push to the target square
+    if (getPiece(lm.piece) !== pawn || getColor(lm.piece) !== pawnColor) return false;
+    if (lm.to.x !== col || lm.to.y !== row) return false;
+    // Verify it was a double push (2 squares vertically)
+    if (Math.abs(lm.to.y - lm.from.y) !== 2) return false;
+    return true;
 }
 
 function whitePawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
@@ -253,8 +255,9 @@ function whitePawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
     // can move diagonally only during captures
     if (differenceX == 1 && destValue == blank) {
         // En passant: only allowed if the adjacent enemy pawn just moved 2 squares
-        if (moveToCoord.y == moveFromCoord.y - 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == black
-            && _wasPawnDoublePush(match ? match.lastMove : null, moveFromCoord.y, moveToCoord.x, black)) {
+        if (moveToCoord.y == moveFromCoord.y - 1
+            && board[moveFromCoord.y][moveToCoord.x] === (black | pawn)
+            && _wasPawnDoublePush(match, moveFromCoord.y, moveToCoord.x, black)) {
           return true;
         }
         // console.log('Chess Error: cant move diagonally without enemy');
@@ -297,8 +300,9 @@ function blackPawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
     // can move diagonally only during captures
     if (differenceX == 1 && destValue == blank) {
         // En passant: only allowed if the adjacent enemy pawn just moved 2 squares
-        if (moveToCoord.y == moveFromCoord.y + 1 && getPiece(board[moveFromCoord.y][moveToCoord.x]) == pawn && getColor(board[moveFromCoord.y][moveToCoord.x]) == white
-            && _wasPawnDoublePush(match ? match.lastMove : null, moveFromCoord.y, moveToCoord.x, white)) {
+        if (moveToCoord.y == moveFromCoord.y + 1
+            && board[moveFromCoord.y][moveToCoord.x] === (white | pawn)
+            && _wasPawnDoublePush(match, moveFromCoord.y, moveToCoord.x, white)) {
           return true;
         }
         return false;
@@ -344,12 +348,12 @@ function bishopMoveValidate(board, moveFromCoord, moveToCoord, turn) {
         return false;
     }
     let currCoord = Coord(moveFromCoord.x, moveFromCoord.y);
-    // console.log(currCoord);
+    // // console.log(currCoord);
 
     // go in the direction one step
     currCoord.x += 1 * directionX;
     currCoord.y += 1 * directionY;
-    // console.log(currCoord);
+    // // console.log(currCoord);
 
     let valid = false;
     // go in the direction and check if its all clear
@@ -359,8 +363,8 @@ function bishopMoveValidate(board, moveFromCoord, moveToCoord, turn) {
         currCoord.x += 1 * directionX;
         currCoord.y += 1 * directionY;
     }
-    // console.log(currCoord);
-    // console.log(moveToCoord);
+    // // console.log(currCoord);
+    // // console.log(moveToCoord);
     if (coordEqual(currCoord, moveToCoord))
         valid = true;
     // console.log('Bishop validator::' + valid);
@@ -413,29 +417,6 @@ function rookMoveValidate(board, moveFromCoord, moveToCoord, turn) {
 function queenMoveValidate(board, moveFromCoord, moveToCoord, turn) {
     return bishopMoveValidate(board, moveFromCoord, moveToCoord, turn)
         || rookMoveValidate(board, moveFromCoord, moveToCoord, turn);
-}
-
-// Check if the king is currently in check on the given board for the given turn
-function isKingInCheck(board, turn) {
-    let currColor = turnToColor(turn);
-    let kingPos = Coord(0, 0);
-    for (let i = 0; i < noOfSquares; i++) {
-        for (let j = 0; j < noOfSquares; j++) {
-            if (board[j][i] == (king | currColor)) {
-                kingPos.x = i;
-                kingPos.y = j;
-                break;
-            }
-        }
-    }
-    let enemyColor = black - currColor;
-    let moves = genAllMoves(board, enemyColor);
-    for (let m of moves) {
-        if (coordEqual(m.to, kingPos)) {
-            return true;
-        }
-    }
-    return false;
 }
 
 function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
@@ -506,8 +487,8 @@ function genMoves(board, position){
 }
 
 function genAllMoves(board, color){
-    if(!validBoard(board))
-        return [];
+    // if(!validBoard(board))
+    //     return [];
     let moves = [];
     for(let i = 0; i < noOfSquares; i++){
         for(let j = 0; j < noOfSquares; j++){
@@ -522,25 +503,10 @@ function genAllMoves(board, color){
     return moves;
 }
 
-function deriveCastlingRights(board) {
-    // White: king at (4, 7), rooks at (0, 7) and (7, 7)
-    let wKing   = (board[7][4] & 0b0111) === king;
-    let wRookQ  = (board[7][0] & 0b0111) === rook;
-    let wRookK  = (board[7][7] & 0b0111) === rook;
-
-    // Black: king at (4, 0), rooks at (0, 0) and (7, 0)
-    let bKing   = (board[0][4] & 0b0111) === king;
-    let bRookQ  = (board[0][0] & 0b0111) === rook;
-    let bRookK  = (board[0][7] & 0b0111) === rook;
-
-    return {
-        whiteKingSide:  wKing && wRookK,
-        whiteQueenSide: wKing && wRookQ,
-        blackKingSide:  bKing && bRookK,
-        blackQueenSide: bKing && bRookQ
-    };
-}
-
+// CLIENT-ONLY: the server tracks castlingRights in match state and does not send it
+// to the client (only the board). So the client must re-derive rights from the board
+// to highlight/allow castling + en-passant in its UI. This is a legitimate difference
+// from the server's 2-arg genLegalMoves, which gets a real match from index.js.
 function genLegalMoves(board, position, castlingRights, lastMove){
     // if(!validBoard(board))
     //     return [];
@@ -561,4 +527,64 @@ function genLegalMoves(board, position, castlingRights, lastMove){
         }
     }
     return moves;
+}
+
+// CLIENT-ONLY: derive castling rights from the board (server has them in match state).
+function deriveCastlingRights(board) {
+    // White: king at (4, 7), rooks at (0, 7) and (7, 7)
+    let wKing   = (board[7][4] & 0b0111) === king;
+    let wRookQ  = (board[7][0] & 0b0111) === rook;
+    let wRookK  = (board[7][7] & 0b0111) === rook;
+
+    // Black: king at (4, 0), rooks at (0, 0) and (7, 0)
+    let bKing   = (board[0][4] & 0b0111) === king;
+    let bRookQ  = (board[0][0] & 0b0111) === rook;
+    let bRookK  = (board[0][7] & 0b0111) === rook;
+
+    return {
+        whiteKingSide:  wKing && wRookK,
+        whiteQueenSide: wKing && wRookQ,
+        blackKingSide:  bKing && bRookK,
+        blackQueenSide: bKing && bRookQ
+    };
+}
+
+function genAllLegalMoves(board, color){
+    // if(!validBoard(board))
+    //     return [];
+    let moves = [];
+    for(let i = 0; i < noOfSquares; i++){
+        for(let j = 0; j < noOfSquares; j++){
+            let pos = Coord(i, j);
+            if(getColor(board[j][i]) == color){
+                for (let k of genLegalMoves(board, pos)){
+                    moves.push(k);
+                }
+            }
+        }
+    }
+    return moves;
+}
+
+// Check if the king is currently in check on the given board for the given turn
+function isKingInCheck(board, turn) {
+    let currColor = turnToColor(turn);
+    let kingPos = Coord(0, 0);
+    for (let i = 0; i < noOfSquares; i++) {
+        for (let j = 0; j < noOfSquares; j++) {
+            if (board[j][i] == (king | currColor)) {
+                kingPos.x = i;
+                kingPos.y = j;
+                break;
+            }
+        }
+    }
+    let enemyColor = black - currColor;
+    let moves = genAllMoves(board, enemyColor);
+    for (let m of moves) {
+        if (coordEqual(m.to, kingPos)) {
+            return true;
+        }
+    }
+    return false;
 }
