@@ -1,0 +1,14 @@
+node_modules/
+.git/
+.gitignore
+tune/
+debug-*.mjs
+trace-*.mjs
+check-*.mjs
+checkpoints/
+test-*.mjs
+errors/
+errors.md
+*.bak
+Dockerfile
+docker-compose.yml
