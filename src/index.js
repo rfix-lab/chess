@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
-import { matches, findMatch, initMatch, findPrivateMatch } from './lib/matchmaking.js';
+import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers } from './lib/matchmaking.js';
 import { authenticateUser, signupUser, validateSession } from './lib/auth.js';
 
 // Rate limiting: prevent clients from spamming socket events
@@ -28,6 +28,41 @@ function isRateLimited(socket, event, windowMs, maxCount) {
   }
   limits[event] = (limits[event] || 0) + 1;
   return limits[event] > maxCount;
+}
+
+// Centralized match termination (S2: memory leak — completed matches were never
+// removed from matches[]). Called from every game-end path: checkmate, stalemate,
+// draw (agreement / threefold / insufficient / 50-move), resign, challenge->resign,
+// forfeit on disconnect. Sequence: gameEnded flag (+ reason) -> clear forfeit timers
+// -> clear pending offers (a pending drawOffer at end-of-game is wiped) -> splice the
+// match out of matches[] BY OBJECT (never by index — errors/02.err) -> broadcast
+// gameEnd so clients clear their saved session (reconnect after end is then rejected
+// with 'gameNotFound' because the match is gone).
+// `lostColor` (0=white, 1=black) names the loser: resign/challenge/forfeit. Without it,
+// the result is draw for agreed draws, or the mated side loses on checkmate/stalemate.
+// The client gameEnd handler (gameSockets.js) reads data.result: 'draw' | 'win' | 'loss'.
+function endMatch(match, reason, lostColor) {
+  if (match.gameEnded) return;
+  match.gameEnded = true;
+  match.endReason = reason;
+  clearMatchTimers(match);
+  match.drawOffered = null;
+  match.challengeFrom = null;
+  match.takebackOffered = null;
+  removeMatch(match);
+
+  let loser = lostColor;
+  if (loser === undefined) {
+    if (reason === 'checkmate' || reason === 'stalemate') {
+      loser = match.turnState; // side to move has no legal reply / is mated
+    }
+  }
+  const resultFor = (color) => {
+    if (loser === undefined || reason === 'draw') return 'draw';
+    return color === loser ? 'loss' : 'win';
+  };
+  if (match.player1Socket) match.player1Socket.emit('gameEnd', { reason, result: resultFor(0) });
+  if (match.player2Socket) match.player2Socket.emit('gameEnd', { reason, result: resultFor(1) });
 }
 
 // express server
@@ -174,10 +209,10 @@ io.on('connection', socket => {
     match.player1Socket.emit('validated', sentBoard, match.turnState);
     match.player2Socket.emit('validated', sentBoard, match.turnState);
 
-    // Check threefold repetition
+    // Check game end: threefold repetition / insufficient material / 50-move / checkmate / stalemate
     const threefold = checkThreefoldDraw(match);
     if (threefold.draw) {
-      match.gameEnded = true;
+      endMatch(match, 'threefold');
       match.player1Socket.emit('draw', { reason: 'threefold' });
       match.player2Socket.emit('draw', { reason: 'threefold' });
       return;
@@ -187,28 +222,26 @@ io.on('connection', socket => {
       match.player2Socket.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
     }
 
-    // Check insufficient material
     if (isInsufficientMaterial(match.boardState)) {
-      match.gameEnded = true;
+      endMatch(match, 'insufficient');
       match.player1Socket.emit('draw', { reason: 'insufficient' });
       match.player2Socket.emit('draw', { reason: 'insufficient' });
       return;
     }
 
-    // Check 50-move rule
     if (isFiftyMoveRule(match.boardState, match.halfMoveClock)) {
-      match.gameEnded = true;
+      endMatch(match, 'fifty');
       match.player1Socket.emit('draw', { reason: 'fifty' });
       match.player2Socket.emit('draw', { reason: 'fifty' });
       return;
     }
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason === 'checkmate') {
-      match.gameEnded = true;
+      endMatch(match, 'checkmate');
       match.player1Socket.emit('checkMate', match.turnState);
       match.player2Socket.emit('checkMate', match.turnState);
     } else if (endReason === 'stalemate') {
-      match.gameEnded = true;
+      endMatch(match, 'stalemate');
       match.player1Socket.emit('stalemate');
       match.player2Socket.emit('stalemate');
     }
@@ -362,10 +395,10 @@ io.on('connection', socket => {
     socket.emit('validated', board, match.turnState);
     if (opponent) opponent.emit('validated', board, match.turnState);
 
-    // Check threefold repetition
+    // Check game end after promotion resolves (same paths as the 'move' handler)
     const threefold = checkThreefoldDraw(match);
     if (threefold.draw) {
-      match.gameEnded = true;
+      endMatch(match, 'threefold');
       socket.emit('draw', { reason: 'threefold' });
       if (opponent) opponent.emit('draw', { reason: 'threefold' });
       return;
@@ -375,17 +408,15 @@ io.on('connection', socket => {
       if (opponent) opponent.emit('repetitionWarning', { patternDescription: threefold.patternDescription });
     }
 
-    // Check insufficient material
     if (isInsufficientMaterial(match.boardState)) {
-      match.gameEnded = true;
+      endMatch(match, 'insufficient');
       socket.emit('draw', { reason: 'insufficient' });
       if (opponent) opponent.emit('draw', { reason: 'insufficient' });
       return;
     }
 
-    // Check 50-move rule
     if (isFiftyMoveRule(match.boardState, match.halfMoveClock)) {
-      match.gameEnded = true;
+      endMatch(match, 'fifty');
       socket.emit('draw', { reason: 'fifty' });
       if (opponent) opponent.emit('draw', { reason: 'fifty' });
       return;
@@ -393,11 +424,11 @@ io.on('connection', socket => {
 
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason === 'checkmate') {
-      match.gameEnded = true;
+      endMatch(match, 'checkmate');
       socket.emit('checkMate', match.turnState);
       if (opponent) opponent.emit('checkMate', match.turnState);
     } else if (endReason === 'stalemate') {
-      match.gameEnded = true;
+      endMatch(match, 'stalemate');
       socket.emit('stalemate');
       if (opponent) opponent.emit('stalemate');
     }
@@ -427,10 +458,9 @@ io.on('connection', socket => {
     if (!match || !match.drawOffered || match.drawOffered === 'declined') return;
 
     if (accepted) {
-      match.gameEnded = true;
-      match.drawOffered = null;
       match.player1Socket.emit('gameEnd', { result: 'draw', reason: 'agreement' });
       match.player2Socket.emit('gameEnd', { result: 'draw', reason: 'agreement' });
+      endMatch(match, 'draw'); // removes from matches[] + clears pending offers/timers
     } else {
       match.drawOffered = 'declined';
       const offererColor = match.player1Socket.id !== socket.id ? 0 : 1;
@@ -445,10 +475,10 @@ io.on('connection', socket => {
     const match = matches.find(m => m.matchId === matchId);
     if (!match || match.gameEnded) return;
 
-    match.gameEnded = true;
     const resignedColor = match.player1Socket.id === socket.id ? 0 : 1;
     match.player1Socket.emit('resignReceived', { resigned: resignedColor });
     match.player2Socket.emit('resignReceived', { resigned: resignedColor });
+    endMatch(match, 'resign', resignedColor); // removes from matches[] + clears pending offers/timers
   });
 
   // Challenge to resign
@@ -478,11 +508,11 @@ io.on('connection', socket => {
     if (!match || !match.challengeFrom || match.challengeFrom === 'declined') return;
 
     if (accepted) {
-      match.gameEnded = true;
       match.challengeFrom = null;
       const challengedColor = match.player1Socket.id === socket.id ? 0 : 1;
       match.player1Socket.emit('resignReceived', { resigned: challengedColor });
       match.player2Socket.emit('resignReceived', { resigned: challengedColor });
+      endMatch(match, 'challenge', challengedColor); // removes from matches[] + clears pending offers/timers
     } else {
       match.challengeFrom = 'declined';
       const challengerColor = match.player1Socket.id !== socket.id ? 0 : 1;
@@ -565,17 +595,17 @@ io.on('connection', socket => {
     const match = matches.find(m => m.player1Socket?.id === socket.id || m.player2Socket?.id === socket.id);
     if (!match || match.gameEnded) return;
 
-    // Set 5-minute forfeit timer
+    // Cancel any pre-existing forfeit timer (e.g. the other player disconnected
+    // earlier and this player also left — we only want one active timer).
+    clearMatchTimers(match);
+
+    // Set 5-minute forfeit timer. The disconnected socket is passed to endMatch so
+    // the gameEnd broadcast can compute win/loss per player (client gameEnd handler
+    // reads data.result: 'draw'|'win'|'loss').
     const timer = setTimeout(() => {
       if (match.gameEnded) return;
-      match.gameEnded = true;
-      const winnerSocket = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
-      if (winnerSocket) {
-        winnerSocket.emit('gameEnd', { reason: 'opponent_disconnect', result: 'win' });
-      }
-      // Clean up match from array
-      const idx = matches.indexOf(match);
-      if (idx !== -1) matches.splice(idx, 1);
+      const lostColor = match.player1Socket?.id === socket.id ? 0 : 1;
+      endMatch(match, 'opponent_disconnect', lostColor); // single cleanup point (S2)
     }, 5 * 60 * 1000);
 
     if (!match.disconnectTimers) match.disconnectTimers = {};

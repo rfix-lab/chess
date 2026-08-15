@@ -10,6 +10,22 @@
 */
 export let matches = [];
 
+// Remove a match from the pool by object reference (NOT by index — matchIds are not array
+// indices; see errors/02.err). No-op if the match is already gone.
+export function removeMatch(match) {
+  const idx = matches.indexOf(match);
+  if (idx !== -1) matches.splice(idx, 1);
+}
+
+// Cancel all pending disconnect/forfeit timers for a match (call before setting gameEnded).
+export function clearMatchTimers(match) {
+  if (!match || !match.disconnectTimers) return;
+  for (const key of Object.keys(match.disconnectTimers)) {
+    clearTimeout(match.disconnectTimers[key]);
+  }
+  match.disconnectTimers = {};
+}
+
 
 const initBoardState = [
   [12, 14, 13, 11, 10, 13, 14, 12],
@@ -52,6 +68,8 @@ export function findMatch(playerSocket) {
   for (let i = 0; i < matches.length; i++) {
     if (matches[i].private)
       continue;
+    if (matches[i].gameEnded)
+      continue; // never re-seat a finished match (S2: completed matches are removed, but be safe)
 
     if (matches[i].player2Socket == null) {
       matches[i].player2Socket = playerSocket;
@@ -59,13 +77,20 @@ export function findMatch(playerSocket) {
       return i;
     }
   }
-  matches.push(initMatch(matches.length, playerSocket));
+  // next unique id — matches.length is NOT safe after splice (completed matches get removed)
+  let maxId = -1;
+  for (const m of matches) {
+    if (m.matchId > maxId) maxId = m.matchId;
+  }
+  matches.push(initMatch(maxId + 1, playerSocket));
   return matches.length - 1;
 }
 
 export function findPrivateMatch(playerSocket, matchId) {
   for(let match of matches) {
     if (match.matchId === matchId && match.private) {
+      if (match.gameEnded) continue; // finished private matches never re-enterable (S2)
+
       if (match.player1Socket && match.player1Socket.connected) {
         match.player2Socket = playerSocket;
         startMatch(matchId);
@@ -80,6 +105,8 @@ export function findPrivateMatch(playerSocket, matchId) {
 }
 
 function startMatch(i) {
-  matches[i].player1Socket.emit('startGame', 0, i);
-  matches[i].player2Socket.emit('startGame', 1, i);
+  const m = matches[i];
+  if (!m || !m.player1Socket || !m.player2Socket) return;
+  m.player1Socket.emit('startGame', 0, i);
+  m.player2Socket.emit('startGame', 1, i);
 }
