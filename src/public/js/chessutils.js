@@ -415,6 +415,29 @@ function queenMoveValidate(board, moveFromCoord, moveToCoord, turn) {
         || rookMoveValidate(board, moveFromCoord, moveToCoord, turn);
 }
 
+// Check if the king is currently in check on the given board for the given turn
+function isKingInCheck(board, turn) {
+    let currColor = turnToColor(turn);
+    let kingPos = Coord(0, 0);
+    for (let i = 0; i < noOfSquares; i++) {
+        for (let j = 0; j < noOfSquares; j++) {
+            if (board[j][i] == (king | currColor)) {
+                kingPos.x = i;
+                kingPos.y = j;
+                break;
+            }
+        }
+    }
+    let enemyColor = black - currColor;
+    let moves = genAllMoves(board, enemyColor);
+    for (let m of moves) {
+        if (coordEqual(m.to, kingPos)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
     let destValue = board[moveToCoord.y][moveToCoord.x];
 
@@ -436,7 +459,7 @@ function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
 
         // Path must be clear
         if (dx === 2) {
-            if (board[kingRow][6] !== blank || board[kingRow][7] !== blank) return false;
+            if (board[kingRow][5] !== blank || board[kingRow][6] !== blank) return false;
             if ((board[kingRow][7] & 0b0111) !== rook) return false;
         } else {
             if (board[kingRow][1] !== blank || board[kingRow][2] !== blank || board[kingRow][3] !== blank) return false;
