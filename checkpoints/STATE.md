@@ -1,13 +1,15 @@
 # Chess (Cherry) — аудит и починка — Состояние
-**Обновлено:** 2026-08-15 09:08 MSK
+**Обновлено:** 2026-08-15 09:20 MSK
 **Выполнено:**
 - Инвентаризация src/ — Готово (01-inventory-src.md, 19 файлов / 4691 строка)
 - Инвентаризация корня (тесты/docker/docs/debug) — Готово (02-inventory-root.md)
 - Верификация P1-находок по исходнику — Готово (isKingInCheck undefined + castling path bug подтверждены grep'ом)
 - Декомпозиция на issues — Готово (PLAN.md)
 - **C1 + C2 — DONE** (коммит `bb03f89`; 03-c1c2-client-chessutils.md): клиентская chessutils — добавлена isKingInCheck (1-в-1 с сервером, без export) + исправлен king-side castling path ([5],[6] blank + [7] rook; queen-side уже был верным). Верификация: verify-c1c2.mjs 6/6 (до — 0/6 ReferenceError), node --check OK, test-evergreen 35/35, diff только клиентская chessutils.
-**В работе:** ожидание выбора следующего issue (очередь: T2 → S1 → C3 → T1 → S2 → гигиена)
-**Дальше:** очередь по PLAN.md: T2 (typosquat http) → S1 (XSS) → C3 (sync client/server) → T1 (автономные тесты) → S2 (memory leak) → H1..H7/T3/T6/T7/S3
+- **T2 — DONE** (коммит `c27d5b7`; 04-t2-s1-deps-xss.md): typosquat `http@^0.0.1-security` удалён из package.json + lockfile (http — builtin, `import http from 'http'` в src/index.js:3 работает без npm-пакета). Сервер стартует (`Live on 5599`), `npm ls http` — только артефакт `extraneous` в node_modules (уходит при любом npm install).
+- **S1 — DONE** (коммит `c27d5b7`; 04-t2-s1-deps-xss.md): XSS username в innerHTML. ВАЖНО: код был НЕ в src/views/index.ejs (как в плане), а в `src/public/js/indexSockets.js:30` — `innerHTML` → `textContent`. `#auth-success` используется только для success-сообщения (без HTML), textContent корректен.
+**В работе:** ожидание выбора следующего issue
+**Дальше:** очередь по PLAN.md: C3 (sync client/server) → T1 (автономные тесты) → S2 (memory leak) → H1..H7/T3/T5/T6/T7/S3
 **Ключевые файлы:**
 - checkpoints/01-inventory-src.md — инвентаризация src/ + техдолг + кандидаты
 - checkpoints/02-inventory-root.md — инвентаризация корня + разбор test-chess + Docker
