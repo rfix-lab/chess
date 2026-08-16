@@ -33,6 +33,9 @@ npm start
 ```
 to start the app, its locally hosted by default on `PORT` 5500. This can be configured in `./src/index.js` or by setting the `PORT` environment variable.
 
+## Persistence (stateless)
+The server is intentionally **stateless**: users, sessions, and matches live in RAM only and are **not persisted** — a restart drops all of them. There is no database and no volume to back up. This is a design decision (S3, 2026-08-16), not a bug: run it as a scratch/fun server and don't treat the data as durable.
+
 ## Usage
 First start the app, then nagivate to the hosted url in modern browser, and wait to find a match or generate a link and play with a friend! This is demonstrated in the followings gifs.
 
