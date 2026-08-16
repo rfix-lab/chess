@@ -31,6 +31,7 @@
 | **H5** | P3 | readCookie/writeCookie дублируются в 3 файлах | index.js(client), gameSockets.js | Общий shared util |
 | **H6** | P3 | package.json main: index.js (файла нет) | package.json | Поле удалено/поправлено |
 | **H7** | P3 | Docker: node:18-alpine устарел, version 3.8 deprecated, no volumes | Dockerfile, docker-compose.yml | Обновить при следующем touch (после T3) |
+| **C4** | P1 | РЕГРЕСС (найдено 2026-08-16 в проде после деплоя): гостевой матчмейкинг сломан — guest (sessionID=null) получает authFailed, матч не создаётся, оба на «Waiting for player...». Причина: `!sessionID \|\|` в auth-хендлере (e4f1b02, «fix 12 errors») — оригинал (ec52707) позволял гостей; README/UI обещают guest-режим. src/index.js:283 | src/index.js:283-286 | `sessionID && !validateSession(...)` — гость (пустой) проходит, невалидный непустой → authFailed; регресс-тест «2 guest → startGame both» в test-chess.mjs; npm test зелёный; прод задеплоен и гостевой матч работает |
 
 \* T2 помечен P1-гигиена (security-скан), но не блокирует игру — в очереди после P1-багов.
 
@@ -44,3 +45,8 @@
 7. **H1+H2+H3+H4+H5+T4+T5** (гигиена — 1-2 батча)
 8. **T3 + H7** (Docker)
 9. **T6, T7, S3** (требуют решения пользователя)
+10. **C4** (P1-регресс, найден post-audit 2026-08-16; в работе — гостевой матчмейкинг)
+
+## Статус (2026-08-16)
+- Закрыто: C1, C2, C3, S1, S2, S3, T1–T7, H1–H7 (16/16)
+- Открыто: **C4** (P1, регресс гостевого режима; в работе, checkpoints/12-guest-auth-fix.md)
