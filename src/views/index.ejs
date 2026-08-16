@@ -16,7 +16,8 @@
   <div id="form" class="">
     <div>
       <label for="username">Username</label>
-      <input type="text" name="username" id="username">
+      <input type="text" name="username" id="username" list="username-list" autocomplete="off">
+      <datalist id="username-list"></datalist>
     </div>
     <div>
       <label for="password">Password</label>
@@ -32,6 +33,7 @@
   <div id="signup-fail" class="hide">
     <h3 id="signup-fail-usrnmexists" class="hide">Failed! User name already exists.</h3>
     <h3 id="signup-fail-pswdlen" class="hide">Failed! Enter a non empty password.</h3>
+    <h3 id="signup-fail-pswdinvalid" class="hide">Failed! Username must be 3-32 characters: letters, digits, dot, underscore, dash.</h3>
   </div>
 
   <button onclick="play()" id="play-button">Play as Guest</button>

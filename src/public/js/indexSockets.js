@@ -77,9 +77,44 @@ socket.on('signup', valid => {
       let psdDiv = document.getElementById('signup-fail-pswdlen');
       psdDiv.classList.remove('hide');
       psdDiv.classList.add('show');
+    } else if (valid == -2) {
+      let invDiv = document.getElementById('signup-fail-pswdinvalid');
+      invDiv.classList.remove('hide');
+      invDiv.classList.add('show');
     }
   }
 });
+
+// F1: username autocomplete (native datalist, debounced ~300ms fetch).
+(function () {
+  let debounceTimer = null;
+  let lastPrefix = '';
+  let input = document.getElementById('username');
+  let list = document.getElementById('username-list');
+  if (!input || !list) return;
+
+  const render = (names) => {
+    list.textContent = '';
+    for (const n of names) {
+      const opt = document.createElement('option');
+      opt.value = n;
+      list.appendChild(opt);
+    }
+  };
+
+  input.addEventListener('input', () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    const prefix = input.value.trim();
+    if (!prefix || prefix === lastPrefix) return;
+    lastPrefix = prefix;
+    debounceTimer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/users?prefix=' + encodeURIComponent(prefix));
+        if (res.ok) render(await res.json());
+      } catch (e) { /* non-fatal: typing still works without suggestions */ }
+    }, 300);
+  });
+})();
 
 socket.on('private-match', matchId => {
   // C5: remember the match id so play() joins the author's own private match.

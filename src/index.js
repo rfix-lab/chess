@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers } from './lib/matchmaking.js';
-import { authenticateUser, signupUser, validateSession } from './lib/auth.js';
+import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, START_ELO } from './lib/auth.js';
 
 // Rate limiting: prevent clients from spamming socket events
 const rateLimits = new Map(); // socketId -> { move: 0, challenge: 0, takeback: 0, lastReset: timestamp }
@@ -23,6 +23,7 @@ const CHALLENGE_RATE_LIMIT_MAX = 3;       // max 'challenge' events per window
 const TAKEBACK_RATE_LIMIT_WINDOW_MS = 10000;  // rate-limit window for 'takeback' events
 const TAKEBACK_RATE_LIMIT_MAX = 5;        // max 'takeback' events per window
 const FORFEIT_TIMEOUT_MS = 5 * 60 * 1000; // abandon game on disconnect after 5 minutes
+const ELO_K = 32; // F2: Elo K-factor (classic)
 
 // Board square bit masks (low 4 bits = piece type | color, high bits = UI indicators)
 const PIECE_MASK = 0b01111;        // keep piece+color bits, strip indicators
@@ -79,6 +80,24 @@ function endMatch(match, reason, lostColor) {
   };
   if (match.player1Socket) match.player1Socket.emit('gameEnd', { reason, result: resultFor(0) });
   if (match.player2Socket) match.player2Socket.emit('gameEnd', { reason, result: resultFor(1) });
+
+  // F2: Elo (K=32, start 1500). Rated match = both players registered
+  // (socket.data.user set by the 'auth' handler; guests stay null). Guest
+  // games never touch the rating. The loser's delta is the negative of the
+  // winner's, so the pair sum is preserved (1500+1500=3000 baseline).
+  const u1 = match.player1Socket && match.player1Socket.data && match.player1Socket.data.user;
+  const u2 = match.player2Socket && match.player2Socket.data && match.player2Socket.data.user;
+  if (u1 && u2) {
+    const score1 = loser === undefined ? 0.5 : (loser === 1 ? 1 : 0);
+    const exp1 = 1 / (1 + Math.pow(10, ((u2.elo - u1.elo) / 400)));
+    const delta = Math.round(ELO_K * (score1 - exp1));
+    u1.elo = (Number(u1.elo) || START_ELO) + delta;
+    u2.elo = (Number(u2.elo) || START_ELO) - delta;
+    saveUsersFile(users); // atomic rewrite
+    const eloMsg = { player1: u1.elo, player2: u2.elo };
+    if (match.player1Socket) match.player1Socket.emit('elo', eloMsg);
+    if (match.player2Socket) match.player2Socket.emit('elo', eloMsg);
+  }
 }
 
 // express server
@@ -96,7 +115,10 @@ session:
   id: sessionID,
   expires: expirationDate
 */
-let users = [];
+// F1: user accounts persist in users.csv (DATA_DIR, default /app/data in the
+// container — a named volume on the worker node). Loaded into RAM at startup;
+// sessions and matches remain in-memory only.
+let users = loadUsersFile();
 
 // set up express settings, use ejs for templating
 app.use(express.static(path.dirname(__filename) + '/public'));
@@ -110,6 +132,17 @@ app.get('/', (req, res) => {
 
 app.get('/index', (req, res) => {
   res.render('index');
+});
+
+// F1: username autocomplete for the lobby form. Registered usernames only —
+// no passwords/elo/other data ever leaves this endpoint.
+app.get('/api/users', (req, res) => {
+  const prefix = String(req.query.prefix || '').toLowerCase();
+  const names = users
+    .filter(u => u.username.toLowerCase().startsWith(prefix))
+    .map(u => u.username)
+    .slice(0, 10);
+  res.json(names);
 });
 
 app.get('/game', (req, res) => {
@@ -280,9 +313,16 @@ io.on('connection', socket => {
 
   // this route authenticates a user with a sessionID
   socket.on('auth', (sessionID, matchId) => {
-    if (sessionID && !validateSession(users, sessionID)) {
-      socket.emit('authFailed');
-      return;
+    // F2: remember who this socket is (null for guests) so endMatch can
+    // decide whether the game is rated.
+    socket.data.user = null;
+    if (sessionID) {
+      const user = validateSession(users, sessionID);
+      if (!user) {
+        socket.emit('authFailed');
+        return;
+      }
+      socket.data.user = user;
     }
 
     if (matchId === null) {

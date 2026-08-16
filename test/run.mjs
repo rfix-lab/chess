@@ -9,6 +9,14 @@
 // loop, so the child could never complete a websocket handshake (root cause
 // of the old 3/8: server frozen while test-chess ran).
 import { spawn } from 'child_process';
+import fs from 'fs';
+
+// F1: point the server's user-persistence dir at a throwaway tmp dir so the
+// suites never touch a real /app/data or repo-local users.csv.
+const DATA_DIR = fs.mkdtempSync(new URL('..', import.meta.url).pathname + 'test-data-');
+process.env.DATA_DIR = DATA_DIR;
+console.log(`[runner] DATA_DIR=${DATA_DIR}`);
+
 
 function runSuite(file, env, cwd) {
   return new Promise(resolve => {

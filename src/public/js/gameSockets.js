@@ -297,6 +297,25 @@ socket.on('gameEnd', (data) => {
   };
   document.getElementById('status').innerText = messages[data.result] || 'Game over';
   is_being_validated = false;
+
+  // F2: show updated ratings in the status line (rated games only — the
+  // server emits 'elo' right after 'gameEnd' with both players' new ratings).
+  if (myElo !== null && oppElo !== null) {
+    document.getElementById('status').innerText += ` (Elo: вы ${myElo}, соперник ${oppElo})`;
+  }
+});
+
+let myElo = null;
+let oppElo = null;
+socket.on('elo', (data) => {
+  // player1 = white = color 0, player2 = black = color 1
+  if (my_color === 0) {
+    myElo = data.player1;
+    oppElo = data.player2;
+  } else {
+    myElo = data.player2;
+    oppElo = data.player1;
+  }
 });
 
 // return from server on whether a move was validated or not

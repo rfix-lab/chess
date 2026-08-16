@@ -3,7 +3,7 @@
 <p><b>Cherry</b> is a self-hosted online multiplayer chess app.</p>
 <p>It connects two <b>berries</b> (<i>players</i>) with a <b>stem</b> (<i>server</i>) to produce a cherry!</p>
 <p>It's simple and minimal, written in <code>nodejs</code>, <code>express</code> and <code>socket.io</code>. It uses websockets to enable multiplayer and supports private matches through invite links so you can play with your friends! It also supports user authentication with cookies and sessions.</p>
-<a href="#getting-started">Getting started</a> • <a href="#installation">Installation</a> • <a href="#docker">Docker</a> • <a href="#tests">Tests</a> • <a href="#persistence-stateless">Persistence (stateless)</a> • <a href="#usage">Usage</a>
+<a href="#getting-started">Getting started</a> • <a href="#installation">Installation</a> • <a href="#docker">Docker</a> • <a href="#tests">Tests</a> • <a href="#persistence-stateless">Persistence</a> • <a href="#usage">Usage</a>
 </div>
 
 ## Getting Started
@@ -53,8 +53,10 @@ This runs two suites:
 - `test-evergreen.mjs` — the chess engine (move validation, castling, en passant, promotion, mate/stalemate, draw rules);
 - `test-chess.mjs` — the full HTTP + websocket flow: real signup → sign-in → auth → matchmaking → moves → game end (uses the public API, ephemeral port, clean teardown).
 
-## Persistence (stateless)
-The server is intentionally **stateless**: users, sessions, and matches live in RAM only and are **not persisted** — a restart drops all of them. There is no database and no volume to back up. This is a design decision, not a bug: run it as a scratch/fun server and don't treat the data as durable.
+## Persistence
+User accounts persist in `users.csv` (bcrypt password hash + Elo) in the `DATA_DIR` directory — the named volume `cherry_data` on the worker node in the Docker setup; losing the node loses accounts. Sessions and matches remain in-memory only: a restart drops active sessions and games, but registered users, their passwords (hashed) and Elo survive. Elo: start 1500, K=32, updated after every match between two registered players (guests are unrated).
+
+To login, visit the root `/` page or the `/index` page and either sign up or sign in. The username must match `[a-zA-Z0-9._-]{3,32}` and the password must be non-empty when signing up. A login produces a session for authentication which expires after 7 days.
 
 ## Usage
 First start the app, then navigate to the hosted url in a modern browser, and wait to find a match or generate a link and play with a friend! This is demonstrated in the following gifs.
@@ -64,8 +66,6 @@ To simply play with another user, both users can simply play as guest and their 
 
 To play with a friend we can generate a link, this link is shared with your friend and this sets up a match between you both instead of matchmaking with random people.
 ![links](https://user-images.githubusercontent.com/94549325/207280409-4dba699d-597d-4d09-8306-a893d319f7db.gif)
-
-To login, visit the root `/` page or the `/index` page and either sign up or sign in. No restrictions are imposed other than the password must be non-empty and the username can't already exist when signing up. A login produces a session for authentication which expires after 7 days.
 ![auth](https://user-images.githubusercontent.com/94549325/207280455-9ea7b0e1-c89a-4679-965a-777bb0a60c86.gif)
 
 ## Notes

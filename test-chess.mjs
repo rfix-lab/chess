@@ -1,4 +1,6 @@
 import { io } from 'socket.io-client';
+import fs from 'fs';
+import { loadUsersFile, authenticateUser, saveUsersFile, USERS_CSV } from './src/lib/auth.js';
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -234,6 +236,139 @@ async function test() {
   privA.disconnect();
   privB.disconnect();
   privA2.disconnect();
+
+  // === T-F1: user persistence (users.csv) + autocomplete ===
+  // (a) signup wrote a row with a bcrypt hash (never plaintext)
+  let f1ok = true; let f1err = '';
+  try {
+    const csv = fs.readFileSync(USERS_CSV, 'utf8');
+    const rows = csv.trim().split('\n');
+    if (rows[0] !== 'username,password_hash,elo') { f1ok = false; f1err = 'header: ' + rows[0]; }
+    const row1 = rows.find(r => r.startsWith(uname1 + ','));
+    if (!row1) { f1ok = false; f1err = 'no row for ' + uname1; }
+    else {
+      const parts = row1.split(',');
+      if (parts[1] === 'pass1') { f1ok = false; f1err = 'plaintext password in CSV'; }
+      if (!parts[1].startsWith('$2')) { f1ok = false; f1err = 'not a bcrypt hash: ' + parts[1].slice(0, 10); }
+      if (parts[2] !== '1500') { f1ok = false; f1err = 'elo col: ' + parts[2]; }
+    }
+  } catch (e) { f1ok = false; f1err = String(e); }
+  if (f1ok) pass('F1: signup persisted to users.csv (bcrypt hash, elo 1500)');
+  else fail('F1: signup persisted to users.csv', f1err);
+
+  // (b) "restart": load users from the CSV into a FRESH table and sign in
+  // through the exported functions (unit-style; same code path the server
+  // uses at startup via loadUsersFile()).
+  const freshUsers = loadUsersFile(USERS_CSV);
+  const reloaded = freshUsers.find(u => u.username === uname1);
+  let f1bOk = false, f1bErr = 'not reloaded';
+  if (reloaded && (Number(reloaded.elo) || 1500) === 1500) {
+    const [r, sid] = await authenticateUser(freshUsers, uname1, 'pass1');
+    if (r === 1 && sid) f1bOk = true;
+    else f1bErr = 'signin on reloaded table failed (r=' + r + ')';
+  }
+  if (f1bOk) pass('F1: signin works after "restart" (loadUsersFile + authenticateUser)');
+  else fail('F1: signin works after restart', f1bErr);
+
+  // (c) invalid username (too short) -> -2, not persisted
+  const bad = io(BASE, { transports: ['websocket'] });
+  await Promise.race([new Promise(r => bad.on('connect', r)), sleep(3000)]);
+  const badCode = await new Promise(r => {
+    bad.once('signup', (c) => r(c));
+    bad.emit('signup', { username: 'ab', password: 'whatever' });
+    setTimeout(() => r(null), 3000);
+  });
+  if (badCode === -2) pass('F1: short username -> signup -2');
+  else fail('F1: short username -> signup -2', 'got ' + badCode);
+  bad.disconnect();
+
+  // (d) GET /api/users?prefix= — case-insensitive, usernames only
+  let apiNames = null; let apiUpper = null;
+  try {
+    apiNames = await (await fetch(BASE + '/api/users?prefix=' + encodeURIComponent(uname1.slice(0, 3).toLowerCase()))).json();
+    apiUpper = await (await fetch(BASE + '/api/users?prefix=' + encodeURIComponent(uname1.slice(0, 3).toUpperCase()))).json();
+  } catch (e) { f1err = String(e); }
+  if (Array.isArray(apiNames) && apiNames.includes(uname1) && apiNames.length <= 10 &&
+      Array.isArray(apiUpper) && apiUpper.includes(uname1)) {
+    pass('F1: GET /api/users?prefix= returns the name (case-insensitive)');
+  } else {
+    fail('F1: GET /api/users?prefix=', `lower=${JSON.stringify(apiNames)} upper=${JSON.stringify(apiUpper)} ${f1err}`);
+  }
+
+  // === T-F2: Elo (start 1500, K=32) — two registered players, scholar's mate ===
+  const e1 = io(BASE, { transports: ['websocket'] });
+  const e2 = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => e1.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => e2.on('connect', r)), sleep(3000)])
+  ]);
+  const eloU1 = 'eloW_' + Date.now(), eloU2 = 'eloB_' + Date.now();
+  e1.emit('signup', { username: eloU1, password: 'pw1' });
+  await sleep(100);
+  e2.emit('signup', { username: eloU2, password: 'pw2' });
+  await sleep(100);
+  const e1s = await new Promise(r => { e1.once('signin', (ok, s) => r(s)); e1.emit('signin', { username: eloU1, password: 'pw1' }); setTimeout(() => r(null), 3000); });
+  const e2s = await new Promise(r => { e2.once('signin', (ok, s) => r(s)); e2.emit('signin', { username: eloU2, password: 'pw2' }); setTimeout(() => r(null), 3000); });
+
+  let em1 = null, em2 = null;
+  let e1Color = null, e2Color = null;
+  let e1End = null, e2End = null, e1EloMsg = null, e2EloMsg = null;
+  e1.on('startGame', (c, m) => { e1Color = c; em1 = m; });
+  e2.on('startGame', (c, m) => { e2Color = c; em2 = m; });
+  e1.on('gameEnd', d => { e1End = d; });
+  e2.on('gameEnd', d => { e2End = d; });
+  e1.on('elo', d => { e1EloMsg = d; });
+  e2.on('elo', d => { e2EloMsg = d; });
+
+  if (e1s) e1.emit('auth', e1s, null);
+  if (e2s) e2.emit('auth', e2s, null);
+  await sleep(500);
+
+  if (em1 !== null && em1 === em2) {
+    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
+    const seq = [[4,6,4,4],[4,1,4,3],[5,7,2,4],[1,0,2,2],[3,7,7,3],[6,0,5,2],[7,3,5,1]];
+    for (let i = 0; i < seq.length; i++) {
+      const [fx, fy, tx, ty] = seq[i];
+      (i % 2 === 0 ? e1 : e2).emit('move', em1, { x: fx, y: fy }, { x: tx, y: ty });
+      await sleep(200);
+    }
+    if (e1End && e2End) pass('F2: rated match ended (checkmate)');
+    else fail('F2: rated match ended', `e1=${JSON.stringify(e1End)} e2=${JSON.stringify(e2End)}`);
+  } else {
+    fail('F2: rated match ended', `m1=${em1} m2=${em2}`);
+  }
+
+  // Elo in RAM (reloaded from CSV) + CSV file
+  const after = loadUsersFile(USERS_CSV);
+  const a1 = after.find(u => u.username === eloU1);
+  const a2 = after.find(u => u.username === eloU2);
+  if (a1 && a2) {
+    const w = e1Color === 0 ? a1 : a2;
+    const l = e1Color === 0 ? a2 : a1;
+    if (w.elo > 1500 && l.elo < 1500 && w.elo + l.elo === 3000) {
+      pass('F2: winner >1500, loser <1500, sum 3000 (' + w.elo + '/' + l.elo + ')');
+    } else {
+      fail('F2: elo values', `w=${w.elo} l=${l.elo} sum=${w.elo + l.elo} (e1Color=${e1Color})`);
+    }
+  } else {
+    fail('F2: elo values', 'users not found in reloaded CSV');
+  }
+  const rawCsv = fs.readFileSync(USERS_CSV, 'utf8');
+  const wRow = a1 && a2 ? (e1Color === 0 ? a1 : a2) : null;
+  const lRow = a1 && a2 ? (e1Color === 0 ? a2 : a1) : null;
+  if (wRow && lRow && rawCsv.includes(wRow.username + ',' + wRow.password + ',' + wRow.elo) &&
+      rawCsv.includes(lRow.username + ',' + lRow.password + ',' + lRow.elo)) {
+    pass('F2: new elo values written to users.csv');
+  } else {
+    fail('F2: new elo values written to users.csv', 'row mismatch (e1Color=' + e1Color + ')');
+  }
+  if (e1EloMsg && e2EloMsg && e1EloMsg.player1 === e2EloMsg.player1) {
+    pass('F2: elo event emitted to both players');
+  } else {
+    fail('F2: elo event emitted to both players', `e1=${JSON.stringify(e1EloMsg)} e2=${JSON.stringify(e2EloMsg)}`);
+  }
+  e1.disconnect();
+  e2.disconnect();
 
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;

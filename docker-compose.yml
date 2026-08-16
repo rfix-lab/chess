@@ -21,6 +21,12 @@ services:
         - "traefik.http.services.cherry.loadbalancer.server.port=5500"
     networks:
       - traefik-public
+    volumes:
+      # F1: user accounts (users.csv) persist here; the volume is local to the
+      # worker node (placement node.hostname==first).
+      - cherry_data:/app/data
 networks:
   traefik-public:
     external: true
+volumes:
+  cherry_data:
