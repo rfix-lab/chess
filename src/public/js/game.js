@@ -1,4 +1,3 @@
-// no en passant, castling, or advance drawing yet
 const move_sound = new Audio('/audio/move-self.mp3');
 const capture_sound = new Audio('/audio/capture.mp3');
 const wrong_move_sound = new Audio('/audio/wrong_move_sound.mp3');

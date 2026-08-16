@@ -1,8 +1,6 @@
 let socket = io();
 
 socket.on('signin', (valid, sessionID) => {
-  console.log('signing valid: ' + valid);
-
   if (valid) {
     let form = document.getElementById('form');
     let successDiv = document.getElementById('auth-success');
