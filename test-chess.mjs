@@ -202,7 +202,7 @@ async function test() {
 
   privA.emit('private-match', 1);
   await new Promise(r => { privA.once('private-match', r); sleep(3000); });
-  if (privMatchId) pass('Private: link generated (matchId ' + privMatchId + ')');
+  if (privMatchId != null) pass('Private: link generated (matchId ' + privMatchId + ')');
   else fail('Private: link generated', 'no matchId');
 
   privB.emit('auth', null, privMatchId);
