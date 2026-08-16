@@ -11,7 +11,7 @@
 export let matches = [];
 
 // Remove a match from the pool by object reference (NOT by index — matchIds are not array
-// indices; see errors/02.err). No-op if the match is already gone.
+// indices; see docs/archive/errors/02.err). No-op if the match is already gone.
 export function removeMatch(match) {
   const idx = matches.indexOf(match);
   if (idx !== -1) matches.splice(idx, 1);
