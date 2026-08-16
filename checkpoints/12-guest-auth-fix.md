@@ -1,52 +1,49 @@
-# 12 — Guest-мэтчмейкинг P1: fix + регресс-тест + prod-деплой
+# C4 — Guest matchmaking regression (P1)
+**Дата:** 2026-08-16, найдено post-audit (после деплоя полного аудита), воспроизведено и зафиксировано в prod.
 
-**Дата:** 2026-08-16
-**Статус:** ЗАКРЫТО (fix + tests + prod deploy, все проверки зелёные)
+## Симптом
+Два гостя (без логина) открывают `https://mycheserv.duckdns.org/game` → оба на «Waiting for player...», доска не появляется, игра не начинается.
 
-## Баг
-Два гостя (без логина) на `/game` вечно на «Waiting for player...» — матч
-никогда не создавался.
-
-**Корень:** `src/index.js` auth-хендлер. Гвард `!sessionID` (добавлен в
-`e4f1b02`, «fix 12 errors») отклонял `sessionID = null/undefined` — а именно
-так гость авторизуется (`readCookie('sessionID')` без логина). Baseline
-`ec52707` гостей позволял; README и index.ejs («both users can simply play as
-guest») это обещают.
-
-## Фикс (1 строка, src/index.js:284)
-```diff
-- if (!sessionID || !validateSession(users, sessionID)) {
-+ if (sessionID && !validateSession(users, sessionID)) {
+## Корневая причина
+`src/index.js` auth-хендлер:
+```js
+if (!sessionID || !validateSession(users, sessionID)) {
+  socket.emit('authFailed');
+  return;
+}
 ```
-- `sessionID` пустой/null → гость, валидация пропускается, идёт в `findMatch`
-  (matchId null) / `findPrivateMatch` (matchId непустой) — логика не тронута.
-- Непустой невалидный `sessionID` → по-прежнему `authFailed`.
+Гость шлёт `sessionID = null` (нет cookie) → `!sessionID` = true → `authFailed` → `findMatch`/`findPrivateMatch` не вызываются → матч не создаётся.
 
-## Тесты (test-chess.mjs, +3 проверки)
-1. `Guests: no authFailed on null sessionID` — два клиента `emit('auth', null, null)`.
-2. `2 guest → startGame both (same gameId, colors 0/1)` — оба получили startGame,
-   один gameId, цвета 0 и 1.
-3. `Invalid non-empty sessionID → authFailed` — `emit('auth', 'bogus_123', null)`
-   → authFailed (отдельный третий клиент).
+Регресс введён в `e4f1b02` («fix: all 12 errors + bcrypt auth + session validation + XSS fix + memory leak cleanup»). Оригинал (`ec52707`, baseline Cherry) позволял гостей:
+```js
+// if sessionID is undefined, then the user plays as a guest
+```
+README и UI (index.ejs: «both users can simply play as guest and their matches aren't saved on the server») обещают guest-режим.
 
-Авторизованный флоу (signup→signin→auth с валидным sessionID) покрывается
-существующим T1 — не тронут, проходит.
+## Воссоздание
+2 клиента (socket.io-client, `emit('auth', null, null)`) → оба `authFailed`, `GUEST MATCHMAKING BROKEN`.
+
+## Фикс
+```js
+if (sessionID && !validateSession(users, sessionID)) {
+  socket.emit('authFailed');
+  return;
+}
+```
+Пустой/undefined `sessionID` = гость → проходит в матчмейкинг. Невалидный непустой `sessionID` → `authFailed` (безопасность не ослаблена: чужой сессионный токен по-прежнему отклоняется). Остальная логика auth (matchId null → findMatch, иначе findPrivateMatch) — не тронута.
+
+## Регресс-тесты (test-chess.mjs, +3)
+- T-GUEST: 2 гостя (sessionID=null) → оба `startGame`, разные цвета (0 и 1), один gameId.
+- + 2 дополнительных (невалидный сессионный токен → authFailed; см. файл).
+Итог: test-chess 9 → **12/12**, npm test ALL PASS.
 
 ## Верификация
-- `npm test`: evergreen **35/35** + test-chess **12/12** (9 старых + 3 новых),
-  exit 0.
-- `node --check src/index.js` — OK.
-- In-process repro (`/tmp/repro-guest.mjs`): 2 startGame, **GUEST MATCHMAKING OK**
-  (до фикса: оба authFailed, BROKEN).
+- `npm test`: evergreen 35/35 + test-chess 12/12, exit 0
+- in-process repro: `GUEST MATCHMAKING OK` (2 startGame)
+- **Prod**: rebuild → `docker save|ssh first docker load` → `docker service update --force chess_cherry`
+  - image id совпадает на elastic2 И first: `119b604f9858` (урок: swarm не реплицирует образы; проверять worker)
+  - контейнер `Up 2 min (healthy)`, в логах `Live on 5500`
+  - внешний `https://mycheserv.duckdns.org/index` → 200 (5 раз подряд)
 
-## Prod-деплой
-1. `docker build -t cherry:latest .` (elastic2) → `sha256:119b604f…6cf5b`.
-2. `docker save | gzip -1 | ssh first 'gunzip | docker load'` (swarm не
-   реплицирует образы manager→worker).
-3. `docker service update --force chess_cherry` → converged.
-4. `ssh first docker ps` → `Up 2 minutes (healthy)`.
-5. `curl https://mycheserv.duckdns.org/index` → **5×200** (3s интервал).
-6. WS-check из контейнера: `wget http://127.0.0.1:5500/socket.io/?EIO=4&transport=polling`
-   → `0{"sid":...}` (200, polling handshake OK).
-7. Image id: first == elastic2 == `sha256:119b604f9858268eb9874de66c12f303a7b0fb34097a77f8fa9c57774ab6cf5b` ✓
-   (старый prod-образ `c832eba` заменён).
+## Коммит
+$H (fix) + PLAN 6b3e270 (issue)
