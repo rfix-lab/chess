@@ -25,7 +25,7 @@
   подсветка = легальным ходам фигуры (spot-проверка: конь/ладья/пешка, включая начало партии e2-e4/e2-e5 + рокировка после разработки);
   `move: APPLIED` в логах на каждый ход; npm test 35/35+36/36; прод задеплоен, verify (a)-(e).
 
-## B3 — [DONE, commit в 18-b3b4-lifecycle.md] Ghost seat после обрыва до/в начале матча
+## B3 — [DONE, commit в 18-b3b4-lifecycle.md, `5e01a27`] Ghost seat после обрыва до/в начале матча
 - Симптом: игрок обрывает связь (закрытие вкладки, потеря сети) до старта или в начале;
   seat не освобождается; второй получает `startGame` на мёртвого/ушедшего соперника
   (прошлый вид: «у одного waiting, у второго playing as black»).
@@ -40,7 +40,7 @@
   Клиент gameSockets.js: gameEnd уже читает data.result + reason opponent_disconnect → UI «Победа 🎉» (не трогал).
   Регресс-тест T-B3 (2 клиента, pre-start, один disconnect → второй gameEnd(opponent_disconnect,win) + матч удалён).
 
-## B4 — [DONE, commit в 18-b3b4-lifecycle.md] Session не переживает обновление страницы
+## B4 — [DONE, commit в 18-b3b4-lifecycle.md, `5e01a27`] Session не переживает обновление страницы
 - Симптом: F5 в игре → игрок не возвращается в партию.
 - Лог: `reconnect: gameNotFound reason=slot-occupied gameId= N color= C` → новый сокет отклонён,
   т.к. старый ещё жив (socket.io reconnect-гонка: новое соединение прилетает ДО disconnect-события старого).

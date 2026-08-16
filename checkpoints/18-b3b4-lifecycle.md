@@ -1,6 +1,6 @@
 # 18 — B3+B4 (lifecycle): ghost seat on pre-start disconnect + F5 reconnect
 
-**Статус:** DONE (один фикс-коммит; commit SHA — см. git log / STATE.md)
+**Статус:** DONE (один фикс-коммит; commit SHA: `5e01a27`)
 **Изменённые файлы:** `src/index.js`, `src/public/js/gameSockets.js`, `test-chess.mjs` (regression), `checkpoints/*`.
 
 ## B3 — Ghost seat (pre-start disconnect)
