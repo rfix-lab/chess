@@ -127,6 +127,19 @@ socket.on('gameNotFound', () => {
   window.location.href = '/index';
 });
 
+// B5: session invalid/expired (e.g. washed out by a container restart) — drop
+// both the localStorage game session and the cookie, then back to the lobby.
+// Without this the client just sat on "Waiting for player..." forever.
+socket.on('authFailed', () => {
+  clearSession();
+  deleteSessionCookie();
+  window.location.href = '/index';
+});
+
+function deleteSessionCookie() {
+  deleteCookie('sessionID');
+}
+
 // ============================
 // Draw / Resign / Challenge
 // ============================

@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers } from './lib/matchmaking.js';
-import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, START_ELO } from './lib/auth.js';
+import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, loadSessionsFile, attachSessionsToUsers, START_ELO } from './lib/auth.js';
 import { log as dlog } from './lib/debuglog.js';
 
 // Rate limiting: prevent clients from spamming socket events
@@ -179,8 +179,12 @@ session:
 */
 // F1: user accounts persist in users.csv (DATA_DIR, default /app/data in the
 // container — a named volume on the worker node). Loaded into RAM at startup;
-// sessions and matches remain in-memory only.
+// matches remain in-memory only. B6: sessions now persist too (sessions.json),
+// so a container restart no longer wipes logins while cookies are still live.
 let users = loadUsersFile();
+const sessionEntries = loadSessionsFile();
+attachSessionsToUsers(users, sessionEntries);
+dlog('sessions: loaded from disk count=', sessionEntries.length);
 
 // set up express settings, use ejs for templating
 app.use(express.static(path.dirname(__filename) + '/public'));

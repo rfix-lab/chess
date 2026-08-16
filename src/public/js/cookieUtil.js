@@ -16,3 +16,8 @@ function writeCookie(name, value, days) {
 function readCookie(name) {
   return document.cookie.split('; ').find(row => row.split('=')[0] === name);
 }
+
+function deleteCookie(name) {
+  // path=/ must match writeCookie, otherwise the browser won't expire the cookie.
+  document.cookie = name + "=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+}

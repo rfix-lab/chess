@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 import fs from 'fs';
-import { loadUsersFile, authenticateUser, saveUsersFile, USERS_CSV } from './src/lib/auth.js';
+import bcrypt from 'bcrypt';
+import { loadUsersFile, authenticateUser, validateSession, saveUsersFile, loadSessionsFile, saveSessionsFile, attachSessionsToUsers, USERS_CSV } from './src/lib/auth.js';
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -580,6 +581,51 @@ async function test() {
     fail('B4: F5 reconnect', 'match null (startGame never arrived)');
   }
   b4b.disconnect();
+
+  // === T-B6: session persistence across a container "restart" ===
+  // Simulates exactly what a deploy/restart does: the in-RAM user array is
+  // rebuilt from disk (users.csv + sessions.json), sessions re-attached.
+  // Uses the suite's default DATA_DIR (fresh mkdtemp per run) for the session
+  // file, and an isolated users.csv for the user record. T-B6 runs LAST, so
+  // the file rewrite done by validateSession's persist can't affect other tests.
+  {
+    const b6UsersCsv = `${process.cwd()}/test-data-b6-users-${Date.now()}.csv`;
+    const b6Password = 'b6pass';
+    const b6u1 = loadUsersFile(b6UsersCsv); // materializes the header row
+    b6u1.push({ username: 'b6user1', password: await bcrypt.hash(b6Password, 4), sessions: [], elo: 1500 });
+    saveUsersFile(b6u1, b6UsersCsv);
+    const [b6r, b6sid] = await authenticateUser(b6u1, 'b6user1', b6Password);
+    if (b6r === 1 && b6sid) pass('B6: authenticateUser -> [1, sid]');
+    else fail('B6: authenticateUser', `r=${b6r} sid=${b6sid}`);
+    // 2) Simulated restart: fresh load from disk, sessions re-attached.
+    const b6Users2 = loadUsersFile(b6UsersCsv);
+    attachSessionsToUsers(b6Users2, loadSessionsFile());
+    const b6Valid = validateSession(b6Users2, b6sid);
+    if (b6Valid && b6Valid.username === 'b6user1')
+      pass('B6: session survives restart (fresh reload + attach -> validateSession OK)');
+    else fail('B6: session survives restart', `validateSession -> ${b6Valid ? b6Valid.username : null}`);
+    // 3) Expired session: planted in the file, then the server restarts.
+    const b6ExpiredId = 'b6expiredid' + Date.now();
+    const b6File0 = loadSessionsFile();
+    b6File0.push({ id: b6ExpiredId, username: 'b6user1', expires: new Date(Date.now() - 60000).toISOString() });
+    saveSessionsFile(b6File0);
+    const b6Users3 = loadUsersFile(b6UsersCsv);
+    attachSessionsToUsers(b6Users3, loadSessionsFile());
+    if (validateSession(b6Users3, b6ExpiredId) === null)
+      pass('B6: expired session not attached after reload (validateSession -> null)');
+    else fail('B6: expired session', 'validateSession returned a user for a past-expires session');
+    // 4) Prune: the expired entry was pruned from RAM at attach (not validated),
+    //    so the file is cleaned lazily on the NEXT persist — production trigger:
+    //    the user signs in again, authenticateUser persists the file from RAM,
+    //    and the stale entry disappears.
+    const b6Users4 = loadUsersFile(b6UsersCsv);
+    attachSessionsToUsers(b6Users4, loadSessionsFile());
+    const [b6r2, b6sid2] = await authenticateUser(b6Users4, 'b6user1', b6Password);
+    if (b6r2 === 1 && !loadSessionsFile().some(e => e.id === b6ExpiredId))
+      pass('B6: expired session pruned from sessions.json on next persist (re-signin)');
+    else fail('B6: expired session pruned from file', `r=${b6r2}, still in file=${loadSessionsFile().some(e => e.id === b6ExpiredId)}`);
+    fs.rmSync(b6UsersCsv, { force: true });
+  }
 
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;

@@ -51,3 +51,36 @@
   .connected) → НЕ gameNotFound, а log + замена сокета (перевод к replace-ветке; отмена forfeit-таймера и по старому socket.id);
   иначе (чужой живой) → gameNotFound reason=slot-occupied. Клиент gameSockets.js: записывает `cherry_socketId` (sessionStorage)
   в socket.on('connect'); tryReconnect() передаёт `prevSocketId` из sessionStorage. Регресс-тест T-B4 (1 ход, F5 c prevSocketId → reconnected).
+
+## B5 — [DONE, P0] Нет authFailed-хендлера на клиенте → «за белых, жду чёрных» вечно
+- **STATUS: DONE** — закрыт одним коммитом с B6 (SHA в STATE.md / git log).
+- Симптом (прод, 2026-08-16 20:20-20:28 МСК, оба игрока): «оба заходят за белых и ожидают черных»
+  = оба зависли на «Waiting for player...» (белая ориентация по умолчанию), не попали в матчмейкинг.
+- Лог (контейнер ec76a1ced0e7): `socket connect sessionCookie= yes` → `auth validateSession FAIL
+  reason=unknown-session` → `auth: REJECTED ... emitting authFailed, matchId= 1` → далее тишина (ни findMatch,
+  ни startGame, ни gameNotFound).
+- Корень: (1) сессии in-memory (см. B6) — после рестарта контейнера (деплой 18:52) сессия вымыта, cookie (1 день)
+  остался → unknown-session; (2) `gameSockets.js` НЕ имеет `socket.on('authFailed', ...)` (grep по src/public/js/
+  пустой; в списке socket.on: startGame/reconnected/gameNotFound/... — authFailed отсутствует). → клиент застревает.
+- Фикс: добавить в `gameSockets.js` `socket.on('authFailed', () => { clearSession(); /* удалить cookie sessionID */
+  window.location.href = '/index'; })` (по образцу уже существующего `gameNotFound`-хендлера на строке ~125, который
+  делает clearSession() + redirect /index). Для чистоты — deleteCookie-хелпер в cookieUtil.js (сейчас есть только
+  write/read; delete = writeCookie с expires в прошлом).
+- Критерий: клиент с валидным cookie, после серверного рестарта (сессия вымыта) → попадает на /index (перелогин),
+  а не зависает в лобби. npm test; прод verify (a)-(e).
+
+## B6 — [DONE, P1, корень B5] Сессии не переживают рестарт контейнера
+- **STATUS: DONE** — sessions.json в DATA_DIR (loadSessionsFile/saveSessionsFile/attachSessionsToUsers + persist при
+  authenticateUser/validateSession), загрузка при старте в src/index.js, 4 regression-теста T-B6. npm test: evergreen 35/35, chess 43/43.
+- Корень: `user.sessions` только в памяти (src/lib/auth.js: «sessions start empty», строки 92/141 `sessions: []`).
+  users.csv = username,password_hash,elo — сессий нет. DATA_DIR=/app/data — volume (cherry_data), уже живёт.
+- Симптом: любой деплой/ребут → все логины сгорают, cookie живут дольше → триггер B5.
+- Фикс-направление: персистентность сессий в DATA_DIR (отдельный файл, напр. sessions.json: [{id,username,expires}])
+  через atomicWriteFile (уже есть в auth.js). load при старте (src/index.js ~183, рядом с loadUsersFile) —
+  прицепить не-протухшие сессии к пользователям; save при authenticateUser (новый session); delete при expiry
+  (validateSession) — prune. Публичный API (authenticateUser/validateSession/saveUsersFile/loadUsersFile) не ломать.
+- Безопасность: session id уже random 16-byte hex; хранение {id,username,expires} — стандарт. Не логировать id в
+  stdout (debuglog уже не логит id — только username/reason).
+- Критерий: T-B6 (in-process): authenticateUser → «рестарт» (перезагрузка из диска) → validateSession OK;
+  expired → FAIL + prune. npm test; прод: залогиниться → `docker service update --force chess_cherry` → тот же
+  cookie продолжает валидироваться (без перелога).

@@ -10,6 +10,7 @@ import { log } from './debuglog.js';
 // a named volume to it.
 export const DATA_DIR = process.env.DATA_DIR || '/app/data';
 export const USERS_CSV = path.join(DATA_DIR, 'users.csv');
+export const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 export const USERNAME_RE = /^[a-zA-Z0-9._-]{3,32}$/;
 export const START_ELO = 1500;
 
@@ -27,6 +28,7 @@ export let authenticateUser = async (users, username, password) => {
           expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         }
         user.sessions.push(session);
+        persistUserSessions(users);
         log('auth signin OK username=', username);
         return [1, session.id];
       }
@@ -44,8 +46,9 @@ export let validateSession = (users, sessionID) => {
           log('auth validateSession OK username=', user.username);
           return user;
         } else {
-          // expired — remove it
+          // expired — remove it (from RAM and from sessions.json)
           user.sessions = user.sessions.filter(s => s.id !== sessionID);
+          persistUserSessions(users);
           log('auth validateSession FAIL reason=expired username=', user.username);
           return null;
         }
@@ -62,6 +65,53 @@ export function atomicWriteFile(file, data) {
   const tmp = file + '.' + process.pid + '.' + Date.now() + '.tmp';
   fs.writeFileSync(tmp, data);
   fs.renameSync(tmp, file);
+}
+
+// B6: session persistence in sessions.json — [{id, username, expires(ISO string)}].
+// This is the ONLY place user.sessions mutates (authenticateUser / validateSession),
+// so these three helpers + persistUserSessions cover the whole lifecycle.
+export function loadSessionsFile(file = SESSIONS_FILE) {
+  try {
+    const text = fs.readFileSync(file, 'utf8');
+    if (!text.trim()) return [];
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return []; // missing/corrupt file -> start empty
+  }
+}
+
+export function saveSessionsFile(entries, file = SESSIONS_FILE) {
+  atomicWriteFile(file, JSON.stringify(entries));
+}
+
+export function attachSessionsToUsers(users, entries) {
+  // Attach live sessions to the loaded users. Prune: expired entries are not
+  // attached (and thus drop out of the file on the next persistUserSessions).
+  const now = new Date();
+  for (const entry of entries) {
+    if (!entry || !entry.id || !entry.username || !entry.expires) continue;
+    const user = users.find(u => u.username === entry.username);
+    if (!user) continue;
+    if (new Date(entry.expires) > now) {
+      user.sessions.push({ id: entry.id, expires: entry.expires });
+    }
+  }
+}
+
+// Rebuild the flat entries array from the in-RAM users and write it atomically.
+function persistUserSessions(users) {
+  const entries = [];
+  for (const u of users) {
+    for (const s of u.sessions) {
+      entries.push({
+        id: s.id,
+        username: u.username,
+        expires: s.expires instanceof Date ? s.expires.toISOString() : s.expires
+      });
+    }
+  }
+  saveSessionsFile(entries);
 }
 
 export function loadUsersFile(file = USERS_CSV) {
