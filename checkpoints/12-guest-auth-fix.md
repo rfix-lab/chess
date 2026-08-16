@@ -46,4 +46,4 @@ if (sessionID && !validateSession(users, sessionID)) {
   - внешний `https://mycheserv.duckdns.org/index` → 200 (5 раз подряд)
 
 ## Коммит
-$H (fix) + PLAN 6b3e270 (issue)
+21dbe35 (fix + 3 regression tests + deploy 119b604f) + f33d84d (report) + 6b3e270 (issue in PLAN)
