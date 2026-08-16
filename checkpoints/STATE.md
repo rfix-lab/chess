@@ -1,7 +1,7 @@
 # Chess (Cherry) — аудит и починка — Состояние
 **Обновлено:** 2026-08-16 13:10 MSK
 **Выполнено:**
-- **T1 — DONE** (коммит `<T1HASH>`; 07-t1-tests.md): автономные тесты + `npm test` (test/run.mjs, in-process сервер на ephemeral-порту listen(0); async spawn — spawnSync замораживал сервер; test-chess: реальный signup/signin вместо фиктивных сессий, castlingRights не-ожидаемо по C3, exit code по результатам). npm test: evergreen 35/35 + chess 9/9, exit 0, standalone-старт OK.
+- **T1 — DONE** (коммит `98886ae`; 07-t1-tests.md): автономные тесты + `npm test` (test/run.mjs, in-process сервер на ephemeral-порту listen(0); async spawn — spawnSync замораживал сервер; test-chess: реальный signup/signin вместо фиктивных сессий, castlingRights не-ожидаемо по C3, exit code по результатам). npm test: evergreen 35/35 + chess 9/9, exit 0, standalone-старт OK.
 - Инвентаризация src/ — Готово (01-inventory-src.md, 19 файлов / 4691 строка)
 - Инвентаризация корня (тесты/docker/docs/debug) — Готово (02-inventory-root.md)
 - Верификация P1-находок по исходнику — Готово (isKingInCheck undefined + castling path bug подтверждены grep'ом)
