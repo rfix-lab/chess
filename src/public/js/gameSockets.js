@@ -1,5 +1,13 @@
 var socket = io();
 
+// B4: remember the current socket.io id — on page reload/reconnect socket.io
+// v4 generates a NEW id, and the server needs the PREVIOUS id to recognize the
+// returning client (socket.io reconnect race: the new connection can arrive
+// before the old socket's 'disconnect' event, so the old one may still be .connected).
+socket.on('connect', () => {
+  try { sessionStorage.setItem('cherry_socketId', socket.id); } catch (e) {}
+});
+
 // --- Session persistence helpers ---
 const SESSION_KEY = 'cherry_session';
 
@@ -37,7 +45,9 @@ function tryReconnect() {
   if (!session || session.gameId == null) return false;
 
   const sessionID = readCookie('sessionID');
-  socket.emit('reconnect', { gameId: session.gameId, color: session.color, sessionID });
+  let prevSocketId = null;
+  try { prevSocketId = sessionStorage.getItem('cherry_socketId'); } catch (e) {}
+  socket.emit('reconnect', { gameId: session.gameId, color: session.color, sessionID, prevSocketId });
   return true;
 }
 

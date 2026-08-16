@@ -478,6 +478,109 @@ async function test() {
   z1.disconnect();
   z2.disconnect();
 
+  // === T-B3: pre-start disconnect (ghost seat) ===
+  // Two guests reach startGame with NO moves played (moveHistory empty). One
+  // disconnects → the OTHER must immediately receive 'gameEnd' with reason
+  // 'opponent_disconnect' and result 'win' (winner = the one still connected),
+  // and the match must be REMOVED: a fresh guest's findMatch gets a NEW matchId
+  // (not re-seated into the dead match).
+  const b3a = io(BASE, { transports: ['websocket'] });
+  const b3b = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => b3a.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => b3b.on('connect', r)), sleep(3000)])
+  ]);
+  let b3Match = null, b3aColor = null, b3bColor = null, b3EndA = null, b3EndB = null;
+  b3a.on('startGame', (c, m) => { b3aColor = c; if (b3Match === null) b3Match = m; });
+  b3b.on('startGame', (c, m) => { b3bColor = c; if (b3Match === null) b3Match = m; });
+  b3a.on('gameEnd', d => { b3EndA = d; });
+  b3b.on('gameEnd', d => { b3EndB = d; });
+  b3a.emit('auth', null, null);
+  b3b.emit('auth', null, null);
+  await sleep(500);
+  if (b3Match !== null) {
+    b3a.disconnect();
+    await sleep(300);
+    const winnerEnd = b3aColor === 0 ? b3EndB : b3EndA; // b3b stayed connected
+    if (winnerEnd && winnerEnd.reason === 'opponent_disconnect' && winnerEnd.result === 'win')
+      pass('B3: pre-start disconnect → opponent gets gameEnd(opponent_disconnect, win) immediately');
+    else fail('B3: pre-start disconnect → immediate gameEnd', `winnerEnd=${JSON.stringify(winnerEnd)}`);
+    // Match must be REMOVED (endMatch → removeMatch). Reuse-proof check: a
+    // reconnect to the dead match must be rejected with gameNotFound (if the
+    // ghost seat were still pooled, the returning player would re-enter it). We
+    // don't compare numeric matchIds — S2 reuses maxId+1, so a fresh, healthy
+    // match can legitimately carry the same id as a removed one.
+    const b3c = io(BASE, { transports: ['websocket'] });
+    await Promise.race([new Promise(r => b3c.on('connect', r)), sleep(3000)]);
+    let b3cNotFound = false, b3cRecon = false, b3cStart = false;
+    b3c.on('gameNotFound', () => { b3cNotFound = true; });
+    b3c.on('reconnected', () => { b3cRecon = true; });
+    b3c.on('startGame', () => { b3cStart = true; });
+    b3c.emit('reconnect', { gameId: b3Match, color: b3bColor, sessionID: null, prevSocketId: null });
+    await sleep(300);
+    if (b3cNotFound && !b3cRecon && !b3cStart)
+      pass('B3: dead pre-start match removed (reconnect → gameNotFound, no ghost re-seat)');
+    else fail('B3: dead pre-start match removed', `b3Match=${b3Match} notFound=${b3cNotFound} recon=${b3cRecon} start=${b3cStart}`);
+    b3c.disconnect();
+  } else {
+    fail('B3: pre-start disconnect', 'match null (startGame never arrived)');
+  }
+  b3b.disconnect();
+
+  // === T-B4: F5 reconnect (stale socket replacement via prevSocketId) ===
+  // Two guests reach startGame, play ONE move (moveHistory=1). White's socket
+  // disconnects (F5). A NEW socket for the same white player emits 'reconnect'
+  // with the SAME color and the OLD socket's id as prevSocketId → must get
+  // 'reconnected' (NOT gameNotFound), with a correct board + turnState, and the
+  // black player is unaffected.
+  const b4w = io(BASE, { transports: ['websocket'] });
+  const b4b = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => b4w.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => b4b.on('connect', r)), sleep(3000)])
+  ]);
+  let b4Match = null, b4wColor = null, b4bColor = null, b4wValid = 0, b4bValid = 0;
+  b4w.on('startGame', (c, m) => { b4wColor = c; if (b4Match === null) b4Match = m; });
+  b4b.on('startGame', (c, m) => { b4bColor = c; if (b4Match === null) b4Match = m; });
+  b4w.on('validated', () => { b4wValid++; });
+  b4b.on('validated', () => { b4bValid++; });
+  b4w.emit('auth', null, null);
+  b4b.emit('auth', null, null);
+  await sleep(500);
+  if (b4Match !== null) {
+    // One move by white (e2-e4) so moveHistory.length = 1.
+    const wMoveFirst = b4wColor === 0;
+    if (wMoveFirst) {
+      b4w.emit('move', b4Match, { x: 4, y: 6 }, { x: 4, y: 4 });
+    } else {
+      b4w.emit('move', b4Match, { x: 4, y: 1 }, { x: 4, y: 3 });
+    }
+    await sleep(300);
+    const oldWId = b4w.id; // socket.io id BEFORE disconnect (the F5 race case)
+    b4w.disconnect();
+    await sleep(100);
+    // A NEW socket (the reloaded page) reconnects as the same white player,
+    // carrying the old socket's id as prevSocketId.
+    const b4w2 = io(BASE, { transports: ['websocket'] });
+    await Promise.race([new Promise(r => b4w2.on('connect', r)), sleep(3000)]);
+    let b4Recon = null, b4NotFound = false, b4W2End = null;
+    b4w2.on('reconnected', (color, gid, boardState, turnState) => { b4Recon = { color, gid, boardState, turnState }; });
+    b4w2.on('gameNotFound', () => { b4NotFound = true; });
+    b4w2.on('gameEnd', d => { b4W2End = d; });
+    b4w2.emit('reconnect', { gameId: b4Match, color: b4wColor, sessionID: null, prevSocketId: oldWId });
+    await sleep(300);
+    if (!b4NotFound && b4Recon && b4Recon.color === b4wColor && b4Recon.gid === b4Match &&
+        Array.isArray(b4Recon.boardState) && b4Recon.boardState.length === 8 &&
+        (b4Recon.turnState === 0 || b4Recon.turnState === 1))
+      pass('B4: F5 reconnect (prevSocketId=old) → reconnected (not gameNotFound) with board+turnState');
+    else fail('B4: F5 reconnect', `notFound=${b4NotFound} recon=${b4Recon && JSON.stringify({ color: b4Recon.color, gid: b4Recon.gid, turn: b4Recon.turnState, rows: b4Recon.boardState && b4Recon.boardState.length })}`);
+    // Black unaffected: the reconnected white did NOT end the game for black.
+    b4w2.disconnect();
+  } else {
+    fail('B4: F5 reconnect', 'match null (startGame never arrived)');
+  }
+  b4b.disconnect();
+
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;
 }

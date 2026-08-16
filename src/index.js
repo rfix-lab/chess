@@ -447,7 +447,7 @@ io.on('connection', socket => {
   });
 
   // reconnect: player reloads page and wants to rejoin their game with the same color
-  socket.on('reconnect', ({ gameId, color, sessionID }) => {
+  socket.on('reconnect', ({ gameId, color, sessionID, prevSocketId }) => {
     const match = matches.find(m => m.matchId === gameId);
     if (!match) {
       dlog('reconnect: gameNotFound reason=no-such-match gameId=', gameId);
@@ -465,13 +465,30 @@ io.on('connection', socket => {
 
     const playerSocket = color === 0 ? match.player1Socket : match.player2Socket;
 
-    // If current socket is the same (reconnect to self), that's fine
-    // If someone else has this socket slot already → reject (double connect)
+    // If current socket is the same (reconnect to self), that's fine.
+    // If another socket already occupies this color slot:
+    //  - B4: the slot holds a DEAD socket (F5 already fired the old socket's
+    //    'disconnect') OR it's the SAME client (socket.io reconnect race: the
+    //    new connection lands before the old socket's 'disconnect' event, so the
+    //    old one is still .connected) → this is the returning player; replace
+    //    the stale socket instead of rejecting with gameNotFound.
+    //  - otherwise (a different LIVE client holds the slot) → reject.
     if (playerSocket && playerSocket !== socket) {
-      // Another socket already occupies this color slot — reject
-      dlog('reconnect: gameNotFound reason=slot-occupied gameId=', gameId, 'color=', color);
-      socket.emit('gameNotFound');
-      return;
+      const sameClient = !!(prevSocketId && playerSocket.id === prevSocketId);
+      const staleDead = !playerSocket.connected;
+      if (staleDead || sameClient) {
+        dlog('reconnect: replacing stale socket gameId=', gameId, 'color=', color, 'old=', playerSocket.id, 'new=', socket.id, 'oldConnected=', playerSocket.connected, 'sameClient=', sameClient);
+        // The forfeit timer is keyed by the OLD socket.id — cancel it here (the
+        // code below only cancels by the new socket.id).
+        if (match.disconnectTimers && match.disconnectTimers[playerSocket.id]) {
+          clearTimeout(match.disconnectTimers[playerSocket.id]);
+          delete match.disconnectTimers[playerSocket.id];
+        }
+      } else {
+        dlog('reconnect: gameNotFound reason=slot-occupied gameId=', gameId, 'color=', color);
+        socket.emit('gameNotFound');
+        return;
+      }
     }
 
     // Replace the socket (old one disconnected or same)
@@ -785,9 +802,22 @@ io.on('connection', socket => {
     // earlier and this player also left — we only want one active timer).
     clearMatchTimers(match);
 
-    // Set 5-minute forfeit timer. The disconnected socket is passed to endMatch so
-    // the gameEnd broadcast can compute win/loss per player (client gameEnd handler
-    // reads data.result: 'draw'|'win'|'loss').
+    // B3: pre-start disconnect (no moves played yet) — the match never began.
+    // A 5-minute forfeit timer here leaves a "ghost seat": the other player is
+    // seated into this match and gets startGame against a dead opponent. End the
+    // match immediately instead. moveHistory.length===0 = pre-start (the push in
+    // the 'move' handler runs BEFORE the pendingPromotion check, so a pending
+    // promotion already counts as started and falls through to the timer below).
+    if (match.moveHistory.length === 0) {
+      const lostColor = match.player1Socket?.id === socket.id ? 0 : 1;
+      dlog('disconnect: pre-start (no moves) — immediate endMatch matchId=', match.matchId, 'lostColor=', lostColor);
+      endMatch(match, 'opponent_disconnect', lostColor); // single cleanup point (S2)
+      return;
+    }
+
+    // Set 5-minute forfeit timer (game in progress). The disconnected socket is
+    // passed to endMatch so the gameEnd broadcast can compute win/loss per player
+    // (client gameEnd handler reads data.result: 'draw'|'win'|'loss').
     const timer = setTimeout(() => {
       dlog('timer: forfeit timeout fired (', FORFEIT_TIMEOUT_MS, 'ms) matchId=', match.matchId, 'disconnecting-side=', match.player1Socket?.id === socket.id ? 0 : 1);
       if (match.gameEnded) return;
