@@ -87,8 +87,19 @@
     <div class="modal-box">
       <h3 id="gameEndTitle"></h3>
       <p id="gameEndText"></p>
+      <!-- F3: replay — board rewinding + move list -->
+      <div id="replay-box" style="display:none; margin: 10px 0;">
+        <div id="replay-controls">
+          <button id="replay-prev" class="modal-btn modal-btn-secondary" title="Предыдущий ход">⏮</button>
+          <button id="replay-play" class="modal-btn modal-btn-primary" title="Автопроигрывание (1 ход/сек)">▶ Play</button>
+          <button id="replay-pause" class="modal-btn modal-btn-secondary" title="Пауза">⏸</button>
+          <button id="replay-next" class="modal-btn modal-btn-secondary" title="Следующий ход">Next ⏭</button>
+          <button id="replay-reset" class="modal-btn modal-btn-secondary" title="К началу партии">⟲</button>
+        </div>
+        <div id="replay-list" style="max-height: 200px; overflow-y: auto; margin: 8px 0; padding: 8px; background: #16213e; border-radius: 6px; font-size: 14px; line-height: 1.7;"></div>
+      </div>
       <div class="modal-actions">
-        <button onclick="document.getElementById('gameEndModal').style.display='none'; window.location.href='/index'" class="modal-btn modal-btn-primary">Back to Lobby</button>
+        <button id="replay-back-lobby" onclick="document.getElementById('gameEndModal').style.display='none'; window.location.href='/index'" class="modal-btn modal-btn-primary">Back to Lobby</button>
       </div>
     </div>
   </div>

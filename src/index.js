@@ -31,6 +31,42 @@ const INDICATOR_LAST_MOVE = 0b10000;      // highlight last move from/to squares
 const INDICATOR_CHECK = 0b100000;         // highlight king in check
 const INDICATOR_EN_PASSANT = 0b1000000;   // highlight en-passant target square
 
+// F3: serialize the board to a FEN string. Used for replay snapshots; the
+// client's fen_to_board() only parses the piece-placement part, but the rest
+// (side to move, castling, ep, counters) is filled in for a valid FEN.
+function boardToFen(board, match) {
+  let rows = [];
+  for (let y = 0; y < 8; y++) {
+    let row = '', empty = 0;
+    for (let x = 0; x < 8; x++) {
+      const v = board[y][x];
+      if (v === blank) { empty++; continue; }
+      if (empty) { row += empty; empty = 0; }
+      const letters = { 1: 'p', 2: 'k', 3: 'q', 4: 'r', 5: 'b', 6: 'n' };
+      const ch = letters[getPiece(v)];
+      row += (v & black) ? ch.toUpperCase() : ch;
+    }
+    if (empty) row += empty;
+    rows.push(row);
+  }
+  let fen = rows.join('/') + ' ' + (match.turnState === 0 ? 'w' : 'b');
+  const cr = match.castlingRights || {};
+  let c = '';
+  if (cr.whiteKingSide) c += 'K';
+  if (cr.whiteQueenSide) c += 'Q';
+  if (cr.blackKingSide) c += 'k';
+  if (cr.blackQueenSide) c += 'q';
+  fen += ' ' + (c || '-');
+  let ep = '-';
+  const lm = match.lastMove;
+  if (lm && lm.piece && getPiece(lm.piece) === pawn) {
+    if (lm.from.y === 6 && lm.to.y === 4) ep = String.fromCharCode(97 + lm.to.x) + '6';
+    if (lm.from.y === 1 && lm.to.y === 3) ep = String.fromCharCode(97 + lm.to.x) + '3';
+  }
+  fen += ' ' + ep + ' ' + (match.halfMoveClock || 0) + ' ' + (Math.floor(match.moveHistory.length / 2) + 1);
+  return fen;
+}
+
 function isRateLimited(socket, event, windowMs, maxCount) {
   const now = Date.now();
   if (!rateLimits.has(socket.id)) {
@@ -80,6 +116,28 @@ function endMatch(match, reason, lostColor) {
   };
   if (match.player1Socket) match.player1Socket.emit('gameEnd', { reason, result: resultFor(0) });
   if (match.player2Socket) match.player2Socket.emit('gameEnd', { reason, result: resultFor(1) });
+
+  // F3: replay — send both players the full move history right after gameEnd
+  // (the match is already spliced, so the client must keep the history itself —
+  // it stores the payload in localStorage per matchId). `moveHistory` entries
+  // were recorded by the 'move' handler: { from, to, turn, piece, capture,
+  // fen, fenAfter }. fen/fenAfter are FEN snapshots before/after the move,
+  // letting the client rewind positions without re-running the engine.
+  const toFile = (c) => String.fromCharCode(97 + c.x);
+  const toRank = (c) => String(8 - c.y);
+  const replay = (match.moveHistory || []).map((m, i) => ({
+    n: i + 1,
+    color: m.turn,
+    piece: m.piece,
+    capture: !!m.capture,
+    from: m.from,
+    to: m.to,
+    san: toFile(m.from) + toRank(m.from) + (m.capture ? 'x' : '-') + toFile(m.to) + toRank(m.to),
+    fen: m.fen,
+    fenAfter: m.fenAfter
+  }));
+  if (match.player1Socket) match.player1Socket.emit('replay', replay);
+  if (match.player2Socket) match.player2Socket.emit('replay', replay);
 
   // F2: Elo (K=32, start 1500). Rated match = both players registered
   // (socket.data.user set by the 'auth' handler; guests stay null). Guest
@@ -208,6 +266,9 @@ io.on('connection', socket => {
     const isCapture = destPiece !== blank;
     const isEnPassant = isPawn && toCoords.x !== fromCoords.x && destPiece === blank;
 
+    // F3: FEN snapshot BEFORE the move (pre-move position for the replay)
+    const preFen = boardToFen(match.boardState, match);
+
     chessMakeMove(match, fromCoords, toCoords);
 
     // Update halfMoveClock
@@ -217,9 +278,22 @@ io.on('connection', socket => {
       match.halfMoveClock++;
     }
 
+    // F3: FEN snapshot AFTER the move (post-move position for the replay).
+    // For pending promotions the pawn is still on the back rank here; the
+    // 'promotion:choose' handler rewrites fenAfter once the piece is chosen.
+    const postFen = boardToFen(match.boardState, match);
+
     // Record move in history (before turnState flip)
     const turnBefore = 1 - match.turnState;
-    match.moveHistory.push({ from: fromCoords, to: toCoords, turn: turnBefore });
+    match.moveHistory.push({
+      from: fromCoords,
+      to: toCoords,
+      turn: turnBefore,
+      piece,               // piece+color value moved (pre-move square)
+      capture: isCapture || isEnPassant,
+      fen: preFen,
+      fenAfter: postFen
+    });
 
     // If pawn reached promotion square, wait for piece choice
     if (match.pendingPromotion) {
@@ -421,6 +495,12 @@ io.on('connection', socket => {
     match.boardState[to.y][to.x] = color | pieceType;
     match.pendingPromotion = null;
     match.turnState = 1 - match.turnState;
+
+    // F3: fix the replay FEN snapshot — the pawn on the back rank has just
+    // been replaced by the chosen promoted piece.
+    if (match.moveHistory.length) {
+      match.moveHistory[match.moveHistory.length - 1].fenAfter = boardToFen(match.boardState, match);
+    }
 
     // Record the original pawn move in history (turn before flip)
     // moveHistory already recorded in the 'move' handler (line ~103).

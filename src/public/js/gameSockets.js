@@ -303,7 +303,138 @@ socket.on('gameEnd', (data) => {
   if (myElo !== null && oppElo !== null) {
     document.getElementById('status').innerText += ` (Elo: вы ${myElo}, соперник ${oppElo})`;
   }
+  // F3: if the replay is already in hand (or saved from a pre-end receive),
+  // expose it in the end modal.
+  if (replayMoves && replayMoves.length) showReplay();
 });
+
+// --- F3: replay (move history + playback) ---
+// The server emits 'replay' with the full move list right after 'gameEnd'.
+// Each move: { n, color, piece, capture, from {x,y}, to {x,y}, san, fen,
+// fenAfter } — fen/fenAfter are FEN snapshots (before/after the move), so
+// rewinding is just fen_to_board + draw + render_board; no re-simulation.
+const PIECE_ICONS = { '0001': ['♙','♟'], '0010': ['♘','♞'], '0011': ['♗','♝'], '0100': ['♖','♜'], '0101': ['♕','♛'], '0110': ['♔','♚'] };
+let replayMoves = null;      // normalized move list from the server
+let replayIndex = 0;         // how many moves are applied to the displayed board (0 = start)
+let replayTimer = null;      // autoplay interval handle
+
+function replayKey() { return 'replay_' + matchId; }
+
+function saveReplayLocal(moves) {
+  try {
+    localStorage.setItem(replayKey(), JSON.stringify(moves));
+    localStorage.setItem(replayKey() + '_ready', 'true');
+  } catch (e) { /* storage full/unavailable — replay still works in-memory */ }
+}
+
+function clearReplayLocal() {
+  try {
+    localStorage.removeItem(replayKey());
+    localStorage.removeItem(replayKey() + '_ready');
+  } catch (e) {}
+}
+
+function loadReplayLocal() {
+  try {
+    const raw = localStorage.getItem(replayKey());
+    if (!raw || localStorage.getItem(replayKey() + '_ready') !== 'true') return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) { return null; }
+}
+
+function pieceIcon(piece) {
+  const key = (piece & 0b1111).toString(2).padStart(4, '0');
+  const icons = PIECE_ICONS[key];
+  if (!icons) return '?';
+  // color bit 0b1000 set = black piece
+  return icons[piece & 0b1000 ? 1 : 0];
+}
+
+function stopReplayAutoplay() {
+  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+}
+
+function renderReplayList() {
+  const list = document.getElementById('replay-list');
+  if (!list || !replayMoves) return;
+  list.innerHTML = '';
+  const ul = document.createElement('ul');
+  ul.style.listStyle = 'none';
+  ul.style.padding = '0';
+  for (const m of replayMoves) {
+    const li = document.createElement('li');
+    li.textContent = `${m.n}. ${pieceIcon(m.piece)} ${m.san}`;
+    if (m.n === replayIndex) { li.style.fontWeight = 'bold'; li.style.color = '#ffd369'; }
+    ul.appendChild(li);
+  }
+  list.appendChild(ul);
+  // keep the active entry visible
+  const active = ul.children[replayIndex - 1];
+  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+}
+
+function applyReplayPosition(idx) {
+  if (!replayMoves) return;
+  // board is the global from game.js (possibly rotated for black); the board
+  // variable itself is what draw()/render_board() read, so just replace it.
+  if (idx <= 0) {
+    fen_to_board(start_fen); // rewrites global `board`
+  } else {
+    // position after move idx = the fenAfter of the idx-th move
+    const m = replayMoves[idx - 1];
+    if (m && m.fenAfter) fen_to_board(m.fenAfter);
+  }
+  replayIndex = Math.max(0, Math.min(idx, replayMoves.length));
+  draw();
+  render_board();
+  renderReplayList();
+}
+
+function showReplay() {
+  const box = document.getElementById('replay-box');
+  if (!box) return;
+  box.style.display = 'block';
+  replayIndex = 0;
+  stopReplayAutoplay();
+  applyReplayPosition(0);
+}
+
+socket.on('replay', (moves) => {
+  if (!Array.isArray(moves)) return;
+  replayMoves = moves;
+  saveReplayLocal(moves);
+  // If the game is already over and the end modal is open, reveal the replay.
+  const modal = document.getElementById('gameEndModal');
+  if (modal && modal.style.display !== 'none' && moves.length) showReplay();
+});
+
+// Replay controls (wired once; elements exist in game.ejs)
+(function initReplayControls() {
+  const prev = document.getElementById('replay-prev');
+  const play = document.getElementById('replay-play');
+  const pause = document.getElementById('replay-pause');
+  const next = document.getElementById('replay-next');
+  const reset = document.getElementById('replay-reset');
+  if (!prev || !play || !pause || !next || !reset) return;
+  prev.onclick = () => { stopReplayAutoplay(); applyReplayPosition(replayIndex - 1); };
+  next.onclick = () => { stopReplayAutoplay(); applyReplayPosition(replayIndex + 1); };
+  reset.onclick = () => { stopReplayAutoplay(); applyReplayPosition(0); };
+  pause.onclick = () => { stopReplayAutoplay(); };
+  play.onclick = () => {
+    if (!replayMoves || replayTimer) return;
+    if (replayIndex >= replayMoves.length) applyReplayPosition(0); // restart from the top
+    replayTimer = setInterval(() => {
+      if (replayIndex >= replayMoves.length) { stopReplayAutoplay(); return; }
+      applyReplayPosition(replayIndex + 1);
+    }, 1000);
+  };
+  // "Back to Lobby" — drop this match's replay from localStorage before leaving.
+  const backBtn = document.getElementById('replay-back-lobby');
+  if (backBtn) {
+    backBtn.onclick = () => { stopReplayAutoplay(); clearReplayLocal(); window.location.href = '/index'; };
+  }
+})();
 
 let myElo = null;
 let oppElo = null;

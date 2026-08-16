@@ -370,6 +370,114 @@ async function test() {
   e1.disconnect();
   e2.disconnect();
 
+  // === T-REPLAY: move history + replay event (F3) ===
+  // Two guests play a full game to checkmate (scholar's mate), then both
+  // must receive a 'replay' event with the complete normalized move list.
+  const r1 = io(BASE, { transports: ['websocket'] });
+  const r2 = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => r1.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => r2.on('connect', r)), sleep(3000)])
+  ]);
+
+  let rMatch = null, rEnd1 = null, rEnd2 = null, rReplay1 = null, rReplay2 = null;
+  r1.on('startGame', (c, m) => { if (rMatch === null) rMatch = m; });
+  r2.on('startGame', (c, m) => { if (rMatch === null) rMatch = m; });
+  r1.on('gameEnd', d => { rEnd1 = d; });
+  r2.on('gameEnd', d => { rEnd2 = d; });
+  r1.on('replay', m => { rReplay1 = m; });
+  r2.on('replay', m => { rReplay2 = m; });
+  r1.emit('auth', null, null);
+  r2.emit('auth', null, null);
+  await sleep(500);
+
+  if (rMatch !== null) {
+    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
+    const seq = [[4,6,4,4],[4,1,4,3],[5,7,2,4],[1,0,2,2],[3,7,7,3],[6,0,5,2],[7,3,5,1]];
+    for (let i = 0; i < seq.length; i++) {
+      const [fx, fy, tx, ty] = seq[i];
+      (i % 2 === 0 ? r1 : r2).emit('move', rMatch, { x: fx, y: fy }, { x: tx, y: ty });
+      await sleep(200);
+    }
+    if (rEnd1 && rEnd2 && rEnd1.reason === 'checkmate' && rEnd2.reason === 'checkmate')
+      pass('REPLAY: game ended (checkmate)');
+    else
+      fail('REPLAY: game ended', `e1=${JSON.stringify(rEnd1)} e2=${JSON.stringify(rEnd2)}`);
+  } else {
+    fail('REPLAY: game ended', 'match null');
+  }
+
+  // Both clients receive the replay event with a populated, well-shaped list
+  const sanRe = /^[a-h][1-8]([-x])[a-h][1-8]$/;
+  for (const [label, moves, end] of [['client1', rReplay1, rEnd1], ['client2', rReplay2, rEnd2]]) {
+    if (!Array.isArray(moves) || moves.length < 4) {
+      fail(`REPLAY: ${label} received replay array (>=4 moves)`, `got ${JSON.stringify(moves)}`);
+      continue;
+    }
+    let okShape = true, okSan = true;
+    moves.forEach((m, i) => {
+      if (m.n !== i + 1 || (m.color !== 0 && m.color !== 1) || typeof m.piece !== 'number' ||
+          typeof m.capture !== 'boolean' || typeof m.san !== 'string' ||
+          !m.from || !m.to || typeof m.from.x !== 'number' || typeof m.from.y !== 'number' ||
+          typeof m.to.x !== 'number' || typeof m.to.y !== 'number') okShape = false;
+      // san must match from/to: file(from)+rank(from)+(-|x)+file(to)+rank(to)
+      const expected = String.fromCharCode(97 + m.from.x) + (8 - m.from.y) +
+        (m.capture ? 'x' : '-') + String.fromCharCode(97 + m.to.x) + (8 - m.to.y);
+      if (!sanRe.test(m.san) || m.san !== expected) okSan = false;
+    });
+    if (okShape) pass(`REPLAY: ${label} all moves have n/color/piece/capture/from/to/san shape (${moves.length} moves)`);
+    else fail(`REPLAY: ${label} move shape`, JSON.stringify(moves));
+    if (okSan) pass(`REPLAY: ${label} san consistent with from/to (regex + recompute)`);
+    else fail(`REPLAY: ${label} san from/to mismatch`, JSON.stringify(moves.slice(0, 3)));
+    // first move = e2-e4 by white; last move = by the winner (white mated black)
+    if (moves[0].color === 0 && moves[0].san === 'e2-e4')
+      pass(`REPLAY: ${label} first move e2-e4 by white`);
+    else fail(`REPLAY: ${label} first move`, JSON.stringify(moves[0]));
+    const last = moves[moves.length - 1];
+    if (last.color === 0 && end && end.result && (end.reason === 'checkmate'))
+      pass(`REPLAY: ${label} last move color=0 (white) = winner (mated black)`);
+    else fail(`REPLAY: ${label} last move color`, `last=${JSON.stringify(last)} end=${JSON.stringify(end)}`);
+  }
+  if (Array.isArray(rReplay1) && Array.isArray(rReplay2) && JSON.stringify(rReplay1) === JSON.stringify(rReplay2)) {
+    pass(`REPLAY: both clients received identical move lists (${rReplay1.length} moves)`);
+  } else {
+    fail('REPLAY: identical histories', `l1=${rReplay1 && rReplay1.length} l2=${rReplay2 && rReplay2.length}`);
+  }
+  r1.disconnect();
+  r2.disconnect();
+
+  // === T-REPLAY-EDGE: zero-move resign → replay = empty array, no crash ===
+  const z1 = io(BASE, { transports: ['websocket'] });
+  const z2 = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => z1.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => z2.on('connect', r)), sleep(3000)])
+  ]);
+
+  let zMatch = null, zEnd1 = null, zReplay1 = undefined, zReplay2 = undefined;
+  z1.on('startGame', (c, m) => { if (zMatch === null) zMatch = m; });
+  z2.on('startGame', (c, m) => { if (zMatch === null) zMatch = m; });
+  z1.on('gameEnd', d => { zEnd1 = d; });
+  z1.on('replay', m => { zReplay1 = m; });
+  z2.on('replay', m => { zReplay2 = m; });
+  z1.emit('auth', null, null);
+  z2.emit('auth', null, null);
+  await sleep(500);
+  if (zMatch !== null) {
+    z1.emit('resign', zMatch);
+    await sleep(300);
+    if (zEnd1 && zEnd1.reason === 'resign' && Array.isArray(zReplay1) && zReplay1.length === 0 &&
+        Array.isArray(zReplay2) && zReplay2.length === 0) {
+      pass('REPLAY-EDGE: zero-move resign → replay = empty array to both');
+    } else {
+      fail('REPLAY-EDGE: zero-move resign replay', `end=${JSON.stringify(zEnd1)} r1=${JSON.stringify(zReplay1)} r2=${JSON.stringify(zReplay2)}`);
+    }
+  } else {
+    fail('REPLAY-EDGE: zero-move resign replay', 'match null');
+  }
+  z1.disconnect();
+  z2.disconnect();
+
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;
 }
