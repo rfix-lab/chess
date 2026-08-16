@@ -82,6 +82,9 @@ socket.on('signup', valid => {
 });
 
 socket.on('private-match', matchId => {
+  // C5: remember the match id so play() joins the author's own private match.
+  window.__privateMatchId = matchId;
+
   let linkDiv = document.getElementById('generated-link'); 
 
   let url = window.location.host + '/game?matchId=' + matchId;

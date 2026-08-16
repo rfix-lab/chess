@@ -104,9 +104,11 @@ export function findPrivateMatch(playerSocket, matchId) {
   return 0;
 }
 
-function startMatch(i) {
-  const m = matches[i];
+function startMatch(id) {
+  // matchId is NOT an array index — completed matches get spliced out (S2).
+  // Look the match up by id (C5: matches[i] hit undefined → startGame never sent).
+  const m = matches.find(x => x.matchId === id);
   if (!m || !m.player1Socket || !m.player2Socket) return;
-  m.player1Socket.emit('startGame', 0, i);
-  m.player2Socket.emit('startGame', 1, i);
+  m.player1Socket.emit('startGame', 0, id);
+  m.player2Socket.emit('startGame', 1, id);
 }

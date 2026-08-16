@@ -177,6 +177,64 @@ async function test() {
   guest1.disconnect();
   guest2.disconnect();
 
+  // === T-PRIV: private link flow (C5 regression) ===
+  // A (author, like on /index) emits 'private-match' and receives matchId;
+  // B (guest) opens the link: auth(null, matchId); then A2 (guest, what the
+  // author's Play button now does) also auth(null, matchId) -> BOTH must get
+  // startGame with the same id and colors 0/1. Before the fix: startMatch
+  // indexed matches[i] by matchId (m=undefined after splices) and the author
+  // never joined, so both hung on "Waiting for player...".
+  const privA = io(BASE, { transports: ['websocket'] });
+  const privB = io(BASE, { transports: ['websocket'] });
+  const privA2 = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => privA.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => privB.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => privA2.on('connect', r)), sleep(3000)])
+  ]);
+
+  let privMatchId = null;
+  const privColors = {};
+  let privIdSeen = null, privId2 = null, privB2 = null;
+  privA.on('private-match', (id) => { privMatchId = id; });
+  privB.on('startGame', (c, m) => { privColors[1] = c; privIdSeen = m; });
+  privA2.on('startGame', (c, m) => { privColors[2] = c; privId2 = m; });
+
+  privA.emit('private-match', 1);
+  await new Promise(r => { privA.once('private-match', r); sleep(3000); });
+  if (privMatchId) pass('Private: link generated (matchId ' + privMatchId + ')');
+  else fail('Private: link generated', 'no matchId');
+
+  privB.emit('auth', null, privMatchId);
+  await sleep(300);
+  if (privIdSeen === null) pass('Private: first guest waits (no startGame yet)');
+  else fail('Private: first guest waits', 'startGame too early');
+
+  // Author joins via Play (index.js now navigates to /game?matchId=N).
+  privA2.emit('auth', null, privMatchId);
+  await sleep(500);
+
+  if (privIdSeen !== null && privId2 !== null && privIdSeen === privId2 && privIdSeen === privMatchId)
+    pass('Private: B and author both got startGame (same id)');
+  else fail('Private: B and author both got startGame (same id)',
+    `b=${privIdSeen} a2=${privId2} expected=${privMatchId}`);
+  const privColorsOk = (privColors[1] === 0 && privColors[2] === 1) || (privColors[1] === 1 && privColors[2] === 0);
+  if (privColorsOk) pass('Private: colors 0/1 assigned');
+  else fail('Private: colors 0/1 assigned', JSON.stringify(privColors));
+
+  // Bogus non-empty matchId (link to a match that no longer exists) -> nobody gets startGame.
+  const privGhost = io(BASE, { transports: ['websocket'] });
+  await Promise.race([new Promise(r => privGhost.on('connect', r)), sleep(3000)]);
+  privGhost.on('startGame', () => { privB2 = true; });
+  privGhost.emit('auth', null, 999999);
+  await sleep(300);
+  if (!privB2) pass('Private: bogus matchId -> no startGame');
+  else fail('Private: bogus matchId -> no startGame', 'got startGame');
+  privGhost.disconnect();
+  privA.disconnect();
+  privB.disconnect();
+  privA2.disconnect();
+
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;
 }
