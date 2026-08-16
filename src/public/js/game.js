@@ -279,11 +279,37 @@ function selectPiece(x, y) {
     if (getVisualPieceColor(piece) !== my_color) return false;
     selectedSquare = {x: x, y: y};
     legalMoveSquares.clear();
-    let visualBoard = board;
+
+    // The engine (chessutils.js) works in SERVER orientation (row 7 = white home
+    // rank, white pawns on row 6, black pawns on row 1). For black the local
+    // `board` is rotated 180 degrees and (x, y) are visual coordinates, so undo
+    // the rotation before querying the engine and rotate the targets back for
+    // highlighting. Without this, black pawns sit on visual row 6 while the
+    // engine expects row 1: click-to-move highlights were wrong/empty for
+    // pawns and castling was never highlighted for black, so black could not
+    // make pawn moves via click at all. (The drag path in display_possible_moves
+    // already does this conversion.)
+    let engineBoard = board;
     let pos = Coord(x, y);
-    let moves = genLegalMoves(visualBoard, pos, null, lastMove);
+    if (my_color != 0) {
+        engineBoard = [];
+        for (let i = 0; i < no_of_squares; i++) {
+            engineBoard.push([]);
+            for (let j = 0; j < no_of_squares; j++) {
+                engineBoard[i].push(board[no_of_squares - i - 1][no_of_squares - j - 1]);
+            }
+        }
+        pos.x = no_of_squares - x - 1;
+        pos.y = no_of_squares - y - 1;
+    }
+    let moves = genLegalMoves(engineBoard, pos, null, lastMove);
     for (let m of moves) {
-        legalMoveSquares.add(m.to.x + ',' + m.to.y);
+        let tx = m.to.x, ty = m.to.y;
+        if (my_color != 0) {
+            tx = no_of_squares - tx - 1;
+            ty = no_of_squares - ty - 1;
+        }
+        legalMoveSquares.add(tx + ',' + ty);
     }
     return true;
 }
