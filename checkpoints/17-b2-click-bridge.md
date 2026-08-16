@@ -29,7 +29,7 @@ src/public/js/game.js `selectPiece`: при `my_color != 0` доска пере�
 - H4 (координатный мостик) — **подтверждена**, см. корневая причина. `my_color` = 0/1 (turn-значение из startGame/color, НЕ бит цвета); flip `(7-x, 7-y)` математически корректен для 180°-поворота — проблема была в том, что flip в click-пути НЕ применялся к движку.
 
 ## Деплой
-- `docker build -t cherry:latest` (elastic2) → image sha256:____
+- `docker build -t cherry:latest` (elastic2) → image sha256:c6355cc31bfdb74a202e41b9d577eb93091f284bf2677ba5b2759fbc01e50bb9
 - `docker save | gzip | ssh first docker load`, image ID сверен elastic2 == first
 - `docker service update --image <sha> --force chess_cherry` (с elastic2), converged
-- Verify: /index 200; sha256 serv-ed game.js == repo (____); chess_cherry 1/1 healthy; [DEBUG] server started в свежих логах.
+- Verify: /index 200; sha256 serv-ed game.js == repo (647cea3f...); chess_cherry 1/1 healthy; [DEBUG] server started в свежих логах.
