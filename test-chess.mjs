@@ -130,6 +130,53 @@ async function test() {
   
   client2.disconnect();
   
+  // === T-GUEST: 2 guests (sessionID = null) must both get startGame ===
+  // Regression for P1: the `!sessionID` guard in the 'auth' handler (added in
+  // e4f1b02) rejected guest sessions, so two guests on /game stuck on
+  // "Waiting for player..." forever. Guests (null/undefined sessionID) must
+  // skip validation and reach findMatch; only a NON-EMPTY invalid sessionID
+  // must still produce authFailed.
+  const guest1 = io(BASE, { transports: ['websocket'] });
+  const guest2 = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => guest1.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => guest2.on('connect', r)), sleep(3000)])
+  ]);
+
+  const gColors = {};
+  let gMatch1 = null, gMatch2 = null;
+  let gFailed = 0, bogusFailed = false;
+  guest1.on('startGame', (c, m) => { gColors[1] = c; gMatch1 = m; });
+  guest2.on('startGame', (c, m) => { gColors[2] = c; gMatch2 = m; });
+  guest1.on('authFailed', () => gFailed++);
+  guest2.on('authFailed', () => gFailed++);
+
+  guest1.emit('auth', null, null);
+  guest2.emit('auth', null, null);
+  await sleep(500);
+
+  if (gFailed === 0) pass('Guests: no authFailed on null sessionID');
+  else fail('Guests: no authFailed on null sessionID', gFailed + ' authFailed');
+
+  const sameGame = gMatch1 !== null && gMatch1 === gMatch2;
+  const colorsOk = (gColors[1] === 0 && gColors[2] === 1) || (gColors[1] === 1 && gColors[2] === 0);
+  if (sameGame && colorsOk)
+    pass('2 guest → startGame both (same gameId, colors 0/1)');
+  else fail('2 guest → startGame both (same gameId, colors 0/1)',
+    `m1=${gMatch1} m2=${gMatch2} colors=${JSON.stringify(gColors)}`);
+
+  // Non-empty invalid sessionID must still be rejected.
+  const bogus = io(BASE, { transports: ['websocket'] });
+  await Promise.race([new Promise(r => bogus.on('connect', r)), sleep(3000)]);
+  bogus.on('authFailed', () => { bogusFailed = true; });
+  bogus.emit('auth', 'bogus_123', null);
+  await sleep(300);
+  if (bogusFailed) pass('Invalid non-empty sessionID → authFailed');
+  else fail('Invalid non-empty sessionID → authFailed', 'no authFailed');
+  bogus.disconnect();
+  guest1.disconnect();
+  guest2.disconnect();
+
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;
 }

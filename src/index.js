@@ -280,7 +280,7 @@ io.on('connection', socket => {
 
   // this route authenticates a user with a sessionID
   socket.on('auth', (sessionID, matchId) => {
-    if (!sessionID || !validateSession(users, sessionID)) {
+    if (sessionID && !validateSession(users, sessionID)) {
       socket.emit('authFailed');
       return;
     }
