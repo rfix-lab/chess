@@ -18,9 +18,7 @@ function clearSession() {
 }
 
 // --- Auth / reconnect ---
-function readCookie(name) {
-  return document.cookie.split('; ').find(row => row.split('=')[0] === name);
-}
+// readCookie provided by cookieUtil.js (H5: deduplicated)
 
 sendCookie = () => {
   let sessionID = readCookie('sessionID');

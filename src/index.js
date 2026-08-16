@@ -15,6 +15,21 @@ import { authenticateUser, signupUser, validateSession } from './lib/auth.js';
 // Rate limiting: prevent clients from spamming socket events
 const rateLimits = new Map(); // socketId -> { move: 0, challenge: 0, takeback: 0, lastReset: timestamp }
 
+// H4: magic numbers extracted into named constants (values unchanged)
+const MOVE_RATE_LIMIT_WINDOW_MS = 1000;   // rate-limit window for 'move' events
+const MOVE_RATE_LIMIT_MAX = 10;           // max 'move' events per window
+const CHALLENGE_RATE_LIMIT_WINDOW_MS = 10000; // rate-limit window for 'challenge' events
+const CHALLENGE_RATE_LIMIT_MAX = 3;       // max 'challenge' events per window
+const TAKEBACK_RATE_LIMIT_WINDOW_MS = 10000;  // rate-limit window for 'takeback' events
+const TAKEBACK_RATE_LIMIT_MAX = 5;        // max 'takeback' events per window
+const FORFEIT_TIMEOUT_MS = 5 * 60 * 1000; // abandon game on disconnect after 5 minutes
+
+// Board square bit masks (low 4 bits = piece type | color, high bits = UI indicators)
+const PIECE_MASK = 0b01111;        // keep piece+color bits, strip indicators
+const INDICATOR_LAST_MOVE = 0b10000;      // highlight last move from/to squares
+const INDICATOR_CHECK = 0b100000;         // highlight king in check
+const INDICATOR_EN_PASSANT = 0b1000000;   // highlight en-passant target square
+
 function isRateLimited(socket, event, windowMs, maxCount) {
   const now = Date.now();
   if (!rateLimits.has(socket.id)) {
@@ -36,7 +51,7 @@ function isRateLimited(socket, event, windowMs, maxCount) {
 // draw (agreement / threefold / insufficient / 50-move), resign, challenge->resign,
 // forfeit on disconnect. Sequence: gameEnded flag (+ reason) -> clear forfeit timers
 // -> clear pending offers (a pending drawOffer at end-of-game is wiped) -> splice the
-// match out of matches[] BY OBJECT (never by index — errors/02.err) -> broadcast
+// match out of matches[] BY OBJECT (never by index — docs/archive/errors/02.err) -> broadcast
 // gameEnd so clients clear their saved session (reconnect after end is then rejected
 // with 'gameNotFound' because the match is gone).
 // `lostColor` (0=white, 1=black) names the loser: resign/challenge/forfeit. Without it,
@@ -115,7 +130,7 @@ io.on('connection', socket => {
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 10 moves per second
-    if (isRateLimited(socket, 'move', 1000, 10)) {
+    if (isRateLimited(socket, 'move', MOVE_RATE_LIMIT_WINDOW_MS, MOVE_RATE_LIMIT_MAX)) {
       return;
     }
     if (!match || !match.player1Socket || !match.player2Socket || match.gameEnded) return;
@@ -183,16 +198,16 @@ io.on('connection', socket => {
     }
 
     sentBoard = match.boardState.map((arr) => { return arr.slice(); });
-    sentBoard[fromCoords.y][fromCoords.x] |= 0b10000; // move indicators
-    sentBoard[toCoords.y][toCoords.x] |= 0b10000;
+    sentBoard[fromCoords.y][fromCoords.x] |= INDICATOR_LAST_MOVE; // move indicators
+    sentBoard[toCoords.y][toCoords.x] |= INDICATOR_LAST_MOVE;
 
     // En passant: highlight the target square next to a pawn that just moved 2 squares
     const movedPiece = match.boardState[toCoords.y][toCoords.x];
     if (movedPiece === (white | pawn) && fromCoords.y === 6 && toCoords.y === 4) {
-      sentBoard[4][fromCoords.x] |= 0b1000000;
+      sentBoard[4][fromCoords.x] |= INDICATOR_EN_PASSANT;
     }
     if (movedPiece === (black | pawn) && fromCoords.y === 1 && toCoords.y === 3) {
-      sentBoard[3][fromCoords.x] |= 0b1000000;
+      sentBoard[3][fromCoords.x] |= INDICATOR_EN_PASSANT;
     }
 
     // Check indicator: highlight king if in check
@@ -201,7 +216,7 @@ io.on('connection', socket => {
       for (let ki = 0; ki < 8; ki++) {
         for (let kj = 0; kj < 8; kj++) {
           if (match.boardState[ki][kj] === (king | nextColor)) {
-            sentBoard[ki][kj] |= 0b100000;
+            sentBoard[ki][kj] |= INDICATOR_CHECK;
           }
         }
       }
@@ -319,7 +334,7 @@ io.on('connection', socket => {
     }
 
     // Deep-copy board state to avoid move indicator bits
-    const cleanBoard = match.boardState.map((arr) => arr.slice().map((v) => v & 0b01111));
+    const cleanBoard = match.boardState.map((arr) => arr.slice().map((v) => v & PIECE_MASK));
 
     // Add check indicator if applicable
     const reconnectedColor = color === 0 ? 0 : 1;
@@ -328,7 +343,7 @@ io.on('connection', socket => {
       for (let ki = 0; ki < 8; ki++) {
         for (let kj = 0; kj < 8; kj++) {
           if (match.boardState[ki][kj] === (king | kingColor)) {
-            cleanBoard[ki][kj] |= 0b100000;
+            cleanBoard[ki][kj] |= INDICATOR_CHECK;
           }
         }
       }
@@ -375,10 +390,10 @@ io.on('connection', socket => {
     // En passant indicator after promotion (pawn moved 2 squares before promotion)
     const promotedPiece = match.boardState[to.y][to.x];
     if (promotedPiece === (white | pieceType) && from.y === 6 && to.y === 7) {
-      board[4][from.x] |= 0b1000000;
+      board[4][from.x] |= INDICATOR_EN_PASSANT;
     }
     if (promotedPiece === (black | pieceType) && from.y === 1 && to.y === 0) {
-      board[3][from.x] |= 0b1000000;
+      board[3][from.x] |= INDICATOR_EN_PASSANT;
     }
     // Check indicator: highlight king if in check
     const nextColor2 = turnToColor(match.turnState);
@@ -386,7 +401,7 @@ io.on('connection', socket => {
       for (let ki = 0; ki < 8; ki++) {
         for (let kj = 0; kj < 8; kj++) {
           if (match.boardState[ki][kj] === (king | nextColor2)) {
-            board[ki][kj] |= 0b100000;
+            board[ki][kj] |= INDICATOR_CHECK;
           }
         }
       }
@@ -487,7 +502,7 @@ io.on('connection', socket => {
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 3 challenges per 10 seconds
-    if (isRateLimited(socket, 'challenge', 10000, 3)) {
+    if (isRateLimited(socket, 'challenge', CHALLENGE_RATE_LIMIT_WINDOW_MS, CHALLENGE_RATE_LIMIT_MAX)) {
       return;
     }
     if (!match || match.gameEnded) return;
@@ -527,7 +542,7 @@ io.on('connection', socket => {
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 5 takeback requests per 10 seconds
-    if (isRateLimited(socket, 'takeback', 10000, 5)) {
+    if (isRateLimited(socket, 'takeback', TAKEBACK_RATE_LIMIT_WINDOW_MS, TAKEBACK_RATE_LIMIT_MAX)) {
       return;
     }
     if (!match || match.gameEnded) return;
@@ -607,7 +622,7 @@ io.on('connection', socket => {
       if (match.gameEnded) return;
       const lostColor = match.player1Socket?.id === socket.id ? 0 : 1;
       endMatch(match, 'opponent_disconnect', lostColor); // single cleanup point (S2)
-    }, 5 * 60 * 1000);
+    }, FORFEIT_TIMEOUT_MS);
 
     if (!match.disconnectTimers) match.disconnectTimers = {};
     match.disconnectTimers[socket.id] = timer;
