@@ -10,5 +10,11 @@ check-check-debug.mjs
 trace-*.mjs
 test-*.mjs
 
+# T1: real test suites (run by `npm test` via test/run.mjs) are tracked,
+# not debug scratch — un-ignore them so `npm test` works from a clean clone
+!test/
+!test-chess.mjs
+!test-evergreen.mjs
+
 # Backups
 *.bak

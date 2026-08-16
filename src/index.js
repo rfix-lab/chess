@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'url';
 import express from 'express';
 import http from 'http';
+import { pathToFileURL } from 'url';
 import { Server } from 'socket.io';
 import path from 'path';
 
@@ -613,7 +614,11 @@ io.on('connection', socket => {
   });
 });
 
-// start the server
-server.listen(PORT, () => {
-  console.log(`Live on ${PORT}`);
-});
+// start the server (skip when imported by test runner)
+export { app, server, io };
+const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (isMain) {
+  server.listen(PORT, () => {
+    console.log(`Live on ${PORT}`);
+  });
+}
