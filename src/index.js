@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers } from './lib/matchmaking.js';
 import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, START_ELO } from './lib/auth.js';
+import { log as dlog } from './lib/debuglog.js';
 
 // Rate limiting: prevent clients from spamming socket events
 const rateLimits = new Map(); // socketId -> { move: 0, challenge: 0, takeback: 0, lastReset: timestamp }
@@ -98,6 +99,7 @@ function endMatch(match, reason, lostColor) {
   if (match.gameEnded) return;
   match.gameEnded = true;
   match.endReason = reason;
+  dlog('endMatch: matchId=', match.matchId, 'reason=', reason, 'lostColor=', lostColor, 'turnState=', match.turnState);
   clearMatchTimers(match);
   match.drawOffered = null;
   match.challengeFrom = null;
@@ -110,6 +112,7 @@ function endMatch(match, reason, lostColor) {
       loser = match.turnState; // side to move has no legal reply / is mated
     }
   }
+  dlog('endMatch: resolved loser=', loser, 'reason=', reason, 'matchId=', match.matchId);
   const resultFor = (color) => {
     if (loser === undefined || reason === 'draw') return 'draw';
     return color === loser ? 'loss' : 'win';
@@ -149,6 +152,7 @@ function endMatch(match, reason, lostColor) {
     const score1 = loser === undefined ? 0.5 : (loser === 1 ? 1 : 0);
     const exp1 = 1 / (1 + Math.pow(10, ((u2.elo - u1.elo) / 400)));
     const delta = Math.round(ELO_K * (score1 - exp1));
+    dlog('endMatch: elo update matchId=', match.matchId, 'winner-side=', 1 - (loser === undefined ? -1 : loser), 'delta=', delta);
     u1.elo = (Number(u1.elo) || START_ELO) + delta;
     u2.elo = (Number(u2.elo) || START_ELO) - delta;
     saveUsersFile(users); // atomic rewrite
@@ -200,6 +204,7 @@ app.get('/api/users', (req, res) => {
     .filter(u => u.username.toLowerCase().startsWith(prefix))
     .map(u => u.username)
     .slice(0, 10);
+  dlog('api /api/users GET status=200 prefix=', JSON.stringify(prefix), 'returned=', names.length);
   res.json(names);
 });
 
@@ -216,19 +221,40 @@ app.get('/game', (req, res) => {
 
 // socket.io server
 io.on('connection', socket => {
+  // DEBUG: log every connection with session context (cookie + resolved username).
+  // The client stores the session ID in a 'sessionID' cookie; if present we resolve
+  // the username so the log line ties the socket to a real user.
+  const cookie = socket.handshake.headers['cookie'] || '';
+  const sidMatch = cookie.match(/sessionID=([^;\s]+)/);
+  let connUsername = null;
+  if (sidMatch) {
+    // READ-ONLY lookup for logging: must NOT call validateSession() here —
+    // it has a side effect (removes expired sessions), which would change behavior.
+    for (const u of users) {
+      if (u.sessions.some(s => s.id === sidMatch[1])) { connUsername = u.username; break; }
+    }
+  }
+  dlog('socket connect: id=', socket.id, 'sessionCookie=', sidMatch ? 'yes' : 'no', 'username=', connUsername || 'guest');
+
   // this route validates a move sent by a player
   socket.on('move', (matchId, fromCoords, toCoords) => {
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 10 moves per second
     if (isRateLimited(socket, 'move', MOVE_RATE_LIMIT_WINDOW_MS, MOVE_RATE_LIMIT_MAX)) {
+      dlog('move: rate-limited matchId=', matchId, 'from=', JSON.stringify(fromCoords), 'to=', JSON.stringify(toCoords));
       return;
     }
-    if (!match || !match.player1Socket || !match.player2Socket || match.gameEnded) return;
+    if (!match || !match.player1Socket || !match.player2Socket || match.gameEnded) {
+      dlog('move: REJECTED (no active match or game ended) matchId=', matchId,
+          'found=', !!match, 'ended=', !!(match && match.gameEnded));
+      return;
+    }
 
     // Validate coordinates
     if (!fromCoords || !toCoords || typeof fromCoords.x !== 'number' || typeof fromCoords.y !== 'number' ||
         typeof toCoords.x !== 'number' || typeof toCoords.y !== 'number') {
+      dlog('move: REJECTED reason=invalid-coordinates matchId=', matchId, 'from=', JSON.stringify(fromCoords), 'to=', JSON.stringify(toCoords));
       return socket.emit('invalidMove', { reason: 'invalid coordinates' });
     }
 
@@ -241,6 +267,9 @@ io.on('connection', socket => {
 
     // Reject if not the current player's turn or move is illegal
     if (!valid) {
+      dlog('move: REJECTED reason=illegal matchId=', matchId, 'turnState=', match.turnState,
+          'mover-is-p1=', match.player1Socket.id === socket.id,
+          'from=', fromCoords.y + ':' + fromCoords.x, 'to=', toCoords.y + ':' + toCoords.x);
       // Send current board back with a rejection flag
       const currentBoard = match.boardState.map((arr) => { return arr.slice(); });
       match.player1Socket.emit('validated', currentBoard, match.turnState, { rejected: true });
@@ -269,6 +298,7 @@ io.on('connection', socket => {
     // F3: FEN snapshot BEFORE the move (pre-move position for the replay)
     const preFen = boardToFen(match.boardState, match);
 
+    dlog('move: APPLIED matchId=', matchId, 'turn=', match.turnState, 'from=', fromCoords.y + ':' + fromCoords.x, 'to=', toCoords.y + ':' + toCoords.x);
     chessMakeMove(match, fromCoords, toCoords);
 
     // Update halfMoveClock
@@ -297,6 +327,7 @@ io.on('connection', socket => {
 
     // If pawn reached promotion square, wait for piece choice
     if (match.pendingPromotion) {
+      dlog('move: pendingPromotion matchId=', matchId, 'color=', match.pendingPromotion.color);
       sentBoard = match.boardState.map((arr) => { return arr.slice(); });
       const promoColor = match.pendingPromotion.color;
       match.player1Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
@@ -372,6 +403,7 @@ io.on('connection', socket => {
 
   // this route signs in a user
   socket.on('signin', async ({ username, password }) => {
+    dlog('auth signin attempt: username=', username);
     let [r, sessionID] = await authenticateUser(users, username, password);
     socket.emit('signin', r, sessionID);
   });
@@ -393,16 +425,21 @@ io.on('connection', socket => {
     if (sessionID) {
       const user = validateSession(users, sessionID);
       if (!user) {
+        dlog('auth: REJECTED (invalid/expired session) socket=', socket.id, 'emitting authFailed, matchId=', matchId);
         socket.emit('authFailed');
         return;
       }
       socket.data.user = user;
+    } else {
+      dlog('auth: guest (no sessionID) socket=', socket.id, 'matchId=', matchId);
     }
 
     if (matchId === null) {
       // regular match making
+      dlog('auth: routing to findMatch socket=', socket.id);
       findMatch(socket);
     } else {
+      dlog('auth: routing to findPrivateMatch socket=', socket.id, 'matchId=', matchId);
       findPrivateMatch(socket, matchId); // if func returns 0, no private match exists with that matchID (invalid link)
     }
     // use sessionID to identify the user
@@ -413,6 +450,7 @@ io.on('connection', socket => {
   socket.on('reconnect', ({ gameId, color, sessionID }) => {
     const match = matches.find(m => m.matchId === gameId);
     if (!match) {
+      dlog('reconnect: gameNotFound reason=no-such-match gameId=', gameId);
       socket.emit('gameNotFound');
       return;
     }
@@ -420,6 +458,7 @@ io.on('connection', socket => {
     // Game already finished — check if board has checkmate/stalemate for current turn
     const endReason = isGameEndReason(match.boardState, match.turnState);
     if (endReason) {
+      dlog('reconnect: gameNotFound reason=game-ended gameId=', gameId, 'endReason=', endReason);
       socket.emit('gameNotFound');
       return;
     }
@@ -430,6 +469,7 @@ io.on('connection', socket => {
     // If someone else has this socket slot already → reject (double connect)
     if (playerSocket && playerSocket !== socket) {
       // Another socket already occupies this color slot — reject
+      dlog('reconnect: gameNotFound reason=slot-occupied gameId=', gameId, 'color=', color);
       socket.emit('gameNotFound');
       return;
     }
@@ -464,6 +504,7 @@ io.on('connection', socket => {
     }
 
     socket.emit('reconnected', color, gameId, cleanBoard, match.turnState);
+    dlog('reconnect: OK socket=', socket.id, 'gameId=', gameId, 'color=', color);
   });
 
   // this route generates a private match on demand
@@ -481,17 +522,22 @@ io.on('connection', socket => {
 
     matches.push(privateMatch);
 
+    dlog('private-match: created matchId=', privateMatch.matchId, 'for socket=', socket.id);
     socket.emit('private-match', privateMatch.matchId);
   });
 
   // Handle promotion piece selection
   socket.on('promotion:choose', (data) => {
     const match = matches.find(m => m.matchId === data.gameId);
-    if (!match || !match.pendingPromotion) return;
+    if (!match || !match.pendingPromotion) {
+      dlog('promotion:choose: REJECTED (no pending promotion) gameId=', data && data.gameId, 'match=', !!match, 'pending=', !!(match && match.pendingPromotion));
+      return;
+    }
 
     const { from, to, color } = match.pendingPromotion;
     const pieceType = data.pieceType;
 
+    dlog('promotion:choose: matchId=', match.matchId, 'pieceType=', pieceType, 'color=', color);
     match.boardState[to.y][to.x] = color | pieceType;
     match.pendingPromotion = null;
     match.turnState = 1 - match.turnState;
@@ -596,6 +642,7 @@ io.on('connection', socket => {
     if (accepted) {
       match.player1Socket.emit('gameEnd', { result: 'draw', reason: 'agreement' });
       match.player2Socket.emit('gameEnd', { result: 'draw', reason: 'agreement' });
+      dlog('drawResponse: ACCEPTED matchId=', matchId, 'responder-socket=', socket.id);
       endMatch(match, 'draw'); // removes from matches[] + clears pending offers/timers
     } else {
       match.drawOffered = 'declined';
@@ -612,6 +659,7 @@ io.on('connection', socket => {
     if (!match || match.gameEnded) return;
 
     const resignedColor = match.player1Socket.id === socket.id ? 0 : 1;
+    dlog('resign: matchId=', matchId, 'resignedColor=', resignedColor);
     match.player1Socket.emit('resignReceived', { resigned: resignedColor });
     match.player2Socket.emit('resignReceived', { resigned: resignedColor });
     endMatch(match, 'resign', resignedColor); // removes from matches[] + clears pending offers/timers
@@ -646,6 +694,7 @@ io.on('connection', socket => {
     if (accepted) {
       match.challengeFrom = null;
       const challengedColor = match.player1Socket.id === socket.id ? 0 : 1;
+      dlog('challengeResponse: ACCEPTED matchId=', matchId, 'challengedColor=', challengedColor);
       match.player1Socket.emit('resignReceived', { resigned: challengedColor });
       match.player2Socket.emit('resignReceived', { resigned: challengedColor });
       endMatch(match, 'challenge', challengedColor); // removes from matches[] + clears pending offers/timers
@@ -727,6 +776,7 @@ io.on('connection', socket => {
 
   // this route is fired when a socket disconnects
   socket.on('disconnect', () => {
+    dlog('socket disconnect: id=', socket.id, 'username=', (socket.data.user && socket.data.user.username) || 'guest');
     rateLimits.delete(socket.id);
     const match = matches.find(m => m.player1Socket?.id === socket.id || m.player2Socket?.id === socket.id);
     if (!match || match.gameEnded) return;
@@ -739,6 +789,7 @@ io.on('connection', socket => {
     // the gameEnd broadcast can compute win/loss per player (client gameEnd handler
     // reads data.result: 'draw'|'win'|'loss').
     const timer = setTimeout(() => {
+      dlog('timer: forfeit timeout fired (', FORFEIT_TIMEOUT_MS, 'ms) matchId=', match.matchId, 'disconnecting-side=', match.player1Socket?.id === socket.id ? 0 : 1);
       if (match.gameEnded) return;
       const lostColor = match.player1Socket?.id === socket.id ? 0 : 1;
       endMatch(match, 'opponent_disconnect', lostColor); // single cleanup point (S2)
@@ -746,6 +797,7 @@ io.on('connection', socket => {
 
     if (!match.disconnectTimers) match.disconnectTimers = {};
     match.disconnectTimers[socket.id] = timer;
+    dlog('timer: forfeit scheduled in', FORFEIT_TIMEOUT_MS, 'ms matchId=', match.matchId, 'for socket=', socket.id);
   });
 });
 
@@ -755,5 +807,6 @@ const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import
 if (isMain) {
   server.listen(PORT, () => {
     console.log(`Live on ${PORT}`);
+    dlog('server started: PORT=', PORT, 'DEBUG=', process.env.DEBUG, 'users loaded=', users.length);
   });
 }

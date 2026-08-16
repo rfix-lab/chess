@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import fs from 'fs';
 import path from 'path';
+import { log } from './debuglog.js';
 
 // F1: user persistence in users.csv (username,password_hash,elo).
 // DATA_DIR is overridable via env (tests point it at a tmp dir); in the
@@ -26,10 +27,12 @@ export let authenticateUser = async (users, username, password) => {
           expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
         }
         user.sessions.push(session);
+        log('auth signin OK username=', username);
         return [1, session.id];
       }
     }
   }
+  log('auth signin FAIL reason=wrong-password username=', username);
   return [0, null];
 }
 
@@ -38,15 +41,18 @@ export let validateSession = (users, sessionID) => {
     for (let session of user.sessions) {
       if (session.id === sessionID) {
         if (new Date(session.expires) > new Date()) {
+          log('auth validateSession OK username=', user.username);
           return user;
         } else {
           // expired — remove it
           user.sessions = user.sessions.filter(s => s.id !== sessionID);
+          log('auth validateSession FAIL reason=expired username=', user.username);
           return null;
         }
       }
     }
   }
+  log('auth validateSession FAIL reason=unknown-session');
   return null;
 }
 
@@ -109,18 +115,21 @@ export function findUserByName(users, username) {
 // signup codes: 1=ok, 0=username taken, -1=empty password, -2=invalid username.
 export let signupUser = async (users, username, password) => {
   if (!USERNAME_RE.test(username)) {
+    log('auth signup FAIL reason=invalid-username username=', JSON.stringify(username));
     return -2;
   }
 
   // check if user is created
   for (let user of users) {
     if (user.username === username) {
+      log('auth signup FAIL reason=username-taken username=', username);
       return 0;
     }
   }
 
   // check if password is non empty
   if (password.length <= 0) {
+    log('auth signup FAIL reason=empty-password username=', JSON.stringify(username));
     return -1;
   }
 
@@ -138,5 +147,6 @@ export let signupUser = async (users, username, password) => {
   // F1: persist immediately (atomic append == full rewrite of the small file).
   saveUsersFile(users);
 
+  log('auth signup OK username=', username, 'elo=', user.elo);
   return 1;
 }
