@@ -77,7 +77,6 @@ let new_piece; // value of the piece being dragged to the square
 let is_being_validated = false;
 let can_move = false; // to disable dragging when it's not your turn
 let my_color = null;  // white or black
-let matchId = null;
 
 // Click-to-move state
 let selectedSquare = null;        // {x, y} in visual coords or null
