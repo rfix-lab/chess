@@ -35,6 +35,7 @@
 - tune/chess-logic-audit.md — аудит игровой логики (2026-08-08)
 - errors.md + errors/ — 30 исправленных багов (архив)
 **Решения и контекст:**
+- 2026-08-16 16:15: DEBUG-деплой: image sha256:963d5f55...4a9214 (54e5b39+1227d0b), сервис chess_cherry, DEBUG=1, health OK, [DEBUG]-строк в логах есть.
 - Движок (серверная src/lib/chessutils.js, 732 строки) — полный: castling, en passant, promotion, мат/пат, threefold, insufficient material, 50-move. test-evergreen 35/35 PASS.
 - Клиентская копия (src/public/js/chessutils.js, 540) — РАСШЕДШАЯСЯ ВЕТВЬ (12 расхождений), 2 P1-бага: ReferenceError isKingInCheck (425,451), king-side castling path check невалиден (437-440: требует [7] одновременно blank И rook → king-side рокировка в подсветке никогда не проходит; [5] не проверяется вообще).
 - test-chess.mjs 3/8 — 5 падений environmental (требуют сервер на :5500), не логики.
