@@ -69,12 +69,8 @@ socket.on('startGame', (color, gameId) => {
   }
   else {
     document.getElementById('status').innerText = 'Playing as black';
-    // Black sees rotated board (180°)
-    let rotated = [];
-    for (let i = 7; i >= 0; i--) {
-      rotated.push(board[i].slice().reverse());
-    }
-    board = rotated;
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(board, 1);
   }
   // Show game action buttons
   const actionsPanel = document.getElementById('game-actions');
@@ -95,12 +91,8 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
   if (color == 0) {
     board = boardState;
   } else {
-    // Black sees rotated board (180°)
-    let rotated = [];
-    for (let i = 7; i >= 0; i--) {
-      rotated.push(boardState[i].slice().reverse());
-    }
-    board = rotated;
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(boardState, 1);
   }
 
   // Show action buttons
@@ -499,22 +491,24 @@ socket.on('validated', (boardState, turnState, extra) => {
         move_sound.play();
     }
     else {
-      if (((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank)
-        && (board[no_of_squares - 1 - to_position.y][no_of_squares - 1 - to_position.x] & 0b1111) != blank)
+      // black: from_position/to_position are VISUAL coords; boardState is in
+      // server orientation — orientToServer is the same 180-degree map for
+      // both directions (identity for white, so this keeps the legacy index
+      // arithmetic byte-for-byte) — single orientation seam: layout.js
+      let sf = window.ChessLayout.orientToServer(from_position.x, from_position.y, my_color);
+      let tf = window.ChessLayout.orientToServer(to_position.x, to_position.y, my_color);
+      if (((boardState[sf.y][sf.x] & 0b1111) == blank)
+        && (board[tf.y][tf.x] & 0b1111) != blank)
         capture_sound.play();
-      else if ((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank)
+      else if ((boardState[sf.y][sf.x] & 0b1111) == blank)
         move_sound.play();
     }
   }
   if (my_color == 0)
     board = boardState;
-  else {
-    for (let i = 0; i < no_of_squares; i++) {
-      for (let j = 0; j < no_of_squares; j++) {
-        board[i][j] = boardState[no_of_squares - i - 1][no_of_squares - j - 1];
-      }
-    }
-  }
+  else
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(boardState, my_color);
   is_being_validated = false;
   // Clear click-to-move selection after server response
   selectedSquare = null;
@@ -616,11 +610,8 @@ socket.on('takebackAccepted', (boardState, turnState) => {
   if (my_color == 0) {
     board = boardState;
   } else {
-    for (let i = 0; i < no_of_squares; i++) {
-      for (let j = 0; j < no_of_squares; j++) {
-        board[i][j] = boardState[no_of_squares - i - 1][no_of_squares - j - 1];
-      }
-    }
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(boardState, my_color);
   }
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';
