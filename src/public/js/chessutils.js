@@ -141,8 +141,14 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
         }
     }
 
-    // Handle en passant capture: remove the captured pawn
-    if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x) {
+    // Handle en passant capture: remove the captured pawn. This square is
+    // only clobbered for a TRUE en-passant capture (the destination was empty
+    // - the pawn is taken in transit). For a normal diagonal capture the
+    // captured piece sits on the destination square and was already replaced by
+    // the moving pawn above; clobbering the adjacent square here would wrongly
+    // delete a third piece from the check-test board.
+    if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x
+        && board[moveToCoord.y][moveToCoord.x] === blank) {
         newBoard[moveFromCoord.y][moveToCoord.x] = blank;
     }
 
