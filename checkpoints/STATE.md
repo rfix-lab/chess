@@ -63,5 +63,6 @@
 - LESSON: right after `stack deploy`, public URLs return 404 until the task passes healthcheck and Traefik picks up the container — wait for healthy before judging routing.
 - Invariant (do not re-litigate): internal board stays VISUAL orientation (rotated for black); all orientation math only via src/public/js/layout.js.
 - 2026-11-23 02:4x: LIVE GAME TEST on prod — Immortal Game (45 plies, private match, 2 guest sockets): all accepted, gameEnd checkmate win(white), replay 45/45 — ALL PASS. Script test/audit-immortal-game.mjs, отчёт 26-immortal-game.md.
+- 2026-11-23 02:5x: FIX prod — private link `location.host` (no scheme) -> relative URL "Cannot GET" (коммит 99eb3bd, прод ad8e29a36920, force-update нужен был: tag в spec не меняется => stack deploy не пересоздаёт задачу). 27-private-link-scheme.md.
 - Known gaps: E2E never executes a real EP capture (covered transitively, see 25); test-chess timing waits can flake under heavy parallel load (48/51 seen once while E2E ran concurrently; clean on quiet rerun).
 - Local worktrees /root/proj/chess-coordseam and /root/proj/chess-engperft are fully merged into feat/round3-f3 and can be removed after the PR merges.
