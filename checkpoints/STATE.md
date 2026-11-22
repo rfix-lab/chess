@@ -52,3 +52,15 @@
 - 2026-08-16: T1 + H-батч закрыты (98886ae, b686b05). Гигиена-статус: 17 debug-файлов удалены (T4), .bak удалён (H1), .dockerignore/.gitignore уже покрывали паттерны (T3). УРОК: spawnSync в test-runner'е замораживает event loop in-process-сервера → websocket-хендшейк зависает; всегда async spawn.
 - Остаток гигиены: H4 (магические числа), H5 (cookie-util дубль), H6 (package.json main), H7 (Docker image/compose) — в очереди.
 - 2026-08-16 13:50: **C4 (P1, post-audit, из реального использования в проде):** гостевой матчмейкинг сломан — `!sessionID ||` в auth-хендлере (регресс e4f1b02) отклонял гостей (sessionID=null) → оба игрока на «Waiting for player...», матч не создавался. Фикс `21dbe35`: `sessionID && !validateSession(...)` (гость проходит, невалидный токен → authFailed); +3 регресс-теста (test-chess 9→12); in-process repro GUEST MATCHMAKING OK; прод пересобран (119b604f), image-id сходятся на elastic2/first, healthy, /index 200x5. Отчёт checkpoints/12-guest-auth-fix.md, issue в PLAN (6b3e270). УРОК: фиксы auth-валидации (S1/S2/XSS-батч) ломают гостевые пути — при добавлении session-гварда всегда проверять guest-сценарий (sessionID=null), не только logged-in.
+
+---
+
+## Round 3 (2026-11-22/23) — state (English per workspace policy)
+
+- Branch `feat/round3-f3` = engine fixes (`feat/engine-perft-fixes`) + client fixes (`feat/coord-seam-input`) + F3 lastMove/EP sync + designer restyle. PR: https://github.com/rfix-lab/chess/pull/1 (base `baseline`, 21+ commits). Owner rule: no direct push to baseline.
+- Gates on final tree: npm test 51/51; perft 20/20 EXACT; E2E 42/42 (repeated, plus independent reviewer V1 = PASS). Details: checkpoints/25-f3-integration.md, 24-designer.md, 22-engine-perft.md, 21-coord-seam.md, 23-v1 review (in coordseam worktree).
+- PROD redeployed 2026-11-23 00:0x MSK: image cherry:latest = sha256:d9e2b0e9 (old prod 11739da9 replaced); elastic2 build -> docker save|gzip|ssh first docker load (IDs verified equal) -> `docker stack deploy -c docker-compose.yml chess` (service chess_cherry recreated; it and cherry_data volume had been removed earlier, so accounts/replay start empty). Checks: / 302, /index 200, /styles/*.css 200 (new tokens present), socket.io polling 200, container healthy on first, "Live on 5500".
+- LESSON: right after `stack deploy`, public URLs return 404 until the task passes healthcheck and Traefik picks up the container — wait for healthy before judging routing.
+- Invariant (do not re-litigate): internal board stays VISUAL orientation (rotated for black); all orientation math only via src/public/js/layout.js.
+- Known gaps: E2E never executes a real EP capture (covered transitively, see 25); test-chess timing waits can flake under heavy parallel load (48/51 seen once while E2E ran concurrently; clean on quiet rerun).
+- Local worktrees /root/proj/chess-coordseam and /root/proj/chess-engperft are fully merged into feat/round3-f3 and can be removed after the PR merges.
