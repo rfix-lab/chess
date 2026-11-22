@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Index</title>
+  <title>Chess Lobby</title>
 
   <link rel="stylesheet" href="styles/index.css">
   <script src="/socket.io/socket.io.js"></script>
@@ -13,34 +13,41 @@
 </head>
 
 <body>
-  <div id="form" class="">
-    <div>
+  <header class="brand">
+    <h1>♞ Chess</h1>
+    <p>Sign in or jump straight into a game</p>
+  </header>
+
+  <div id="form">
+    <div class="field">
       <label for="username">Username</label>
       <input type="text" name="username" id="username" list="username-list" autocomplete="off">
       <datalist id="username-list"></datalist>
     </div>
-    <div>
+    <div class="field">
       <label for="password">Password</label>
       <input type="password" name="password" id="password">
     </div>
-    <button onclick="submitLoginDetails()">Sign In</button>
-    <button onclick="submitSignUpDetails()">Sign Up</button>
+    <div class="actions">
+      <button class="btn-primary" onclick="submitLoginDetails()">Sign In</button>
+      <button class="btn-secondary" onclick="submitSignUpDetails()">Sign Up</button>
+    </div>
   </div>
-  <div id="auth-success" class="hide"></div>
-  <div id="auth-fail" class="hide">
+
+  <div class="guest">
+    <button onclick="play()" id="play-button" class="btn-primary">Play as Guest</button>
+    <button onclick="genLink()" id="play-button" class="btn-secondary">Generate play link</button>
+    <a href="" id="generated-link" class="hide"></a>
+  </div>
+
+  <div id="auth-success" class="auth-note hide"></div>
+  <div id="auth-fail" class="auth-note hide">
     <h3>Invalid credentials.</h3>
   </div>
-  <div id="signup-fail" class="hide">
+  <div id="signup-fail" class="auth-note hide">
     <h3 id="signup-fail-usrnmexists" class="hide">Failed! User name already exists.</h3>
     <h3 id="signup-fail-pswdlen" class="hide">Failed! Enter a non empty password.</h3>
     <h3 id="signup-fail-pswdinvalid" class="hide">Failed! Username must be 3-32 characters: letters, digits, dot, underscore, dash.</h3>
-  </div>
-
-  <button onclick="play()" id="play-button">Play as Guest</button>
-
-  <div>
-    <button onclick="genLink()" id="play-button">Generate play link</button>
-    <a href="" id="generated-link" class="hide"></a>
   </div>
 
   <script src="js/cookieUtil.js"></script>
