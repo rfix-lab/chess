@@ -1,0 +1,32 @@
+services:
+  cherry:
+    image: cherry:latest
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5500/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname==first
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.cherry.rule=Host(`mycheserv.duckdns.org`)"
+        - "traefik.http.routers.cherry.entrypoints=websecure"
+        - "traefik.http.routers.cherry.tls.certresolver=le"
+        - "traefik.http.services.cherry.loadbalancer.server.port=5500"
+    networks:
+      - traefik-public
+    volumes:
+      # F1: user accounts (users.csv) persist here; the volume is local to the
+      # worker node (placement node.hostname==first).
+      - cherry_data:/app/data
+networks:
+  traefik-public:
+    external: true
+volumes:
+  cherry_data:

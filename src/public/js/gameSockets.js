@@ -1,5 +1,13 @@
 var socket = io();
 
+// B4: remember the current socket.io id — on page reload/reconnect socket.io
+// v4 generates a NEW id, and the server needs the PREVIOUS id to recognize the
+// returning client (socket.io reconnect race: the new connection can arrive
+// before the old socket's 'disconnect' event, so the old one may still be .connected).
+socket.on('connect', () => {
+  try { sessionStorage.setItem('cherry_socketId', socket.id); } catch (e) {}
+});
+
 // --- Session persistence helpers ---
 const SESSION_KEY = 'cherry_session';
 
@@ -18,9 +26,7 @@ function clearSession() {
 }
 
 // --- Auth / reconnect ---
-function readCookie(name) {
-  return document.cookie.split('; ').find(row => row.split('=')[0] === name);
-}
+// readCookie provided by cookieUtil.js (H5: deduplicated)
 
 sendCookie = () => {
   let sessionID = readCookie('sessionID');
@@ -39,7 +45,9 @@ function tryReconnect() {
   if (!session || session.gameId == null) return false;
 
   const sessionID = readCookie('sessionID');
-  socket.emit('reconnect', { gameId: session.gameId, color: session.color, sessionID });
+  let prevSocketId = null;
+  try { prevSocketId = sessionStorage.getItem('cherry_socketId'); } catch (e) {}
+  socket.emit('reconnect', { gameId: session.gameId, color: session.color, sessionID, prevSocketId });
   return true;
 }
 
@@ -53,6 +61,9 @@ socket.on('startGame', (color, gameId) => {
   my_color = color;
   matchId = gameId;
   saveSession(gameId, color);
+  // F3: fresh match => no server lastMove yet; clear any stale value from a
+  // previous game (server sends it only with the first 'validated').
+  lastMove = null;
   capturedByWhite = [];
   capturedByBlack = [];
   if (color == 0) {
@@ -61,12 +72,8 @@ socket.on('startGame', (color, gameId) => {
   }
   else {
     document.getElementById('status').innerText = 'Playing as black';
-    // Black sees rotated board (180°)
-    let rotated = [];
-    for (let i = 7; i >= 0; i--) {
-      rotated.push(board[i].slice().reverse());
-    }
-    board = rotated;
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(board, 1);
   }
   // Show game action buttons
   const actionsPanel = document.getElementById('game-actions');
@@ -75,7 +82,7 @@ socket.on('startGame', (color, gameId) => {
 });
 
 // Server confirms reconnect — restores board state
-socket.on('reconnected', (color, gameId, boardState, turnState) => {
+socket.on('reconnected', (color, gameId, boardState, turnState, lastMoveData) => {
   clearSession(); // no longer need to reconnect
   my_color = color;
   matchId = gameId;
@@ -87,13 +94,12 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
   if (color == 0) {
     board = boardState;
   } else {
-    // Black sees rotated board (180°)
-    let rotated = [];
-    for (let i = 7; i >= 0; i--) {
-      rotated.push(boardState[i].slice().reverse());
-    }
-    board = rotated;
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(boardState, 1);
   }
+  // F3: server-authoritative lastMove (5th payload field) — keeps EP targets
+  // correct across reconnects (F5 mid-game right after a double push).
+  lastMove = lastMoveData || null;
 
   // Show action buttons
   const actionsPanel = document.getElementById('game-actions');
@@ -118,6 +124,19 @@ socket.on('gameNotFound', () => {
   clearSession();
   window.location.href = '/index';
 });
+
+// B5: session invalid/expired (e.g. washed out by a container restart) — drop
+// both the localStorage game session and the cookie, then back to the lobby.
+// Without this the client just sat on "Waiting for player..." forever.
+socket.on('authFailed', () => {
+  clearSession();
+  deleteSessionCookie();
+  window.location.href = '/index';
+});
+
+function deleteSessionCookie() {
+  deleteCookie('sessionID');
+}
 
 // ============================
 // Draw / Resign / Challenge
@@ -299,6 +318,156 @@ socket.on('gameEnd', (data) => {
   };
   document.getElementById('status').innerText = messages[data.result] || 'Game over';
   is_being_validated = false;
+
+  // F2: show updated ratings in the status line (rated games only — the
+  // server emits 'elo' right after 'gameEnd' with both players' new ratings).
+  if (myElo !== null && oppElo !== null) {
+    document.getElementById('status').innerText += ` (Elo: вы ${myElo}, соперник ${oppElo})`;
+  }
+  // F3: if the replay is already in hand (or saved from a pre-end receive),
+  // expose it in the end modal.
+  if (replayMoves && replayMoves.length) showReplay();
+});
+
+// --- F3: replay (move history + playback) ---
+// The server emits 'replay' with the full move list right after 'gameEnd'.
+// Each move: { n, color, piece, capture, from {x,y}, to {x,y}, san, fen,
+// fenAfter } — fen/fenAfter are FEN snapshots (before/after the move), so
+// rewinding is just fen_to_board + draw + render_board; no re-simulation.
+const PIECE_ICONS = { '0001': ['♙','♟'], '0010': ['♘','♞'], '0011': ['♗','♝'], '0100': ['♖','♜'], '0101': ['♕','♛'], '0110': ['♔','♚'] };
+let replayMoves = null;      // normalized move list from the server
+let replayIndex = 0;         // how many moves are applied to the displayed board (0 = start)
+let replayTimer = null;      // autoplay interval handle
+
+function replayKey() { return 'replay_' + matchId; }
+
+function saveReplayLocal(moves) {
+  try {
+    localStorage.setItem(replayKey(), JSON.stringify(moves));
+    localStorage.setItem(replayKey() + '_ready', 'true');
+  } catch (e) { /* storage full/unavailable — replay still works in-memory */ }
+}
+
+function clearReplayLocal() {
+  try {
+    localStorage.removeItem(replayKey());
+    localStorage.removeItem(replayKey() + '_ready');
+  } catch (e) {}
+}
+
+function loadReplayLocal() {
+  try {
+    const raw = localStorage.getItem(replayKey());
+    if (!raw || localStorage.getItem(replayKey() + '_ready') !== 'true') return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) { return null; }
+}
+
+function pieceIcon(piece) {
+  const key = (piece & 0b1111).toString(2).padStart(4, '0');
+  const icons = PIECE_ICONS[key];
+  if (!icons) return '?';
+  // color bit 0b1000 set = black piece
+  return icons[piece & 0b1000 ? 1 : 0];
+}
+
+function stopReplayAutoplay() {
+  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+}
+
+function renderReplayList() {
+  const list = document.getElementById('replay-list');
+  if (!list || !replayMoves) return;
+  list.innerHTML = '';
+  const ul = document.createElement('ul');
+  ul.style.listStyle = 'none';
+  ul.style.padding = '0';
+  for (const m of replayMoves) {
+    const li = document.createElement('li');
+    li.textContent = `${m.n}. ${pieceIcon(m.piece)} ${m.san}`;
+    if (m.n === replayIndex) { li.style.fontWeight = 'bold'; li.style.color = '#ffd369'; }
+    ul.appendChild(li);
+  }
+  list.appendChild(ul);
+  // keep the active entry visible
+  const active = ul.children[replayIndex - 1];
+  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+}
+
+function applyReplayPosition(idx) {
+  if (!replayMoves) return;
+  // board is the global from game.js (possibly rotated for black); the board
+  // variable itself is what draw()/render_board() read, so just replace it.
+  if (idx <= 0) {
+    fen_to_board(start_fen); // rewrites global `board`
+  } else {
+    // position after move idx = the fenAfter of the idx-th move
+    const m = replayMoves[idx - 1];
+    if (m && m.fenAfter) fen_to_board(m.fenAfter);
+  }
+  replayIndex = Math.max(0, Math.min(idx, replayMoves.length));
+  draw();
+  render_board();
+  renderReplayList();
+}
+
+function showReplay() {
+  const box = document.getElementById('replay-box');
+  if (!box) return;
+  box.style.display = 'block';
+  replayIndex = 0;
+  stopReplayAutoplay();
+  applyReplayPosition(0);
+}
+
+socket.on('replay', (moves) => {
+  if (!Array.isArray(moves)) return;
+  replayMoves = moves;
+  saveReplayLocal(moves);
+  // If the game is already over and the end modal is open, reveal the replay.
+  const modal = document.getElementById('gameEndModal');
+  if (modal && modal.style.display !== 'none' && moves.length) showReplay();
+});
+
+// Replay controls (wired once; elements exist in game.ejs)
+(function initReplayControls() {
+  const prev = document.getElementById('replay-prev');
+  const play = document.getElementById('replay-play');
+  const pause = document.getElementById('replay-pause');
+  const next = document.getElementById('replay-next');
+  const reset = document.getElementById('replay-reset');
+  if (!prev || !play || !pause || !next || !reset) return;
+  prev.onclick = () => { stopReplayAutoplay(); applyReplayPosition(replayIndex - 1); };
+  next.onclick = () => { stopReplayAutoplay(); applyReplayPosition(replayIndex + 1); };
+  reset.onclick = () => { stopReplayAutoplay(); applyReplayPosition(0); };
+  pause.onclick = () => { stopReplayAutoplay(); };
+  play.onclick = () => {
+    if (!replayMoves || replayTimer) return;
+    if (replayIndex >= replayMoves.length) applyReplayPosition(0); // restart from the top
+    replayTimer = setInterval(() => {
+      if (replayIndex >= replayMoves.length) { stopReplayAutoplay(); return; }
+      applyReplayPosition(replayIndex + 1);
+    }, 1000);
+  };
+  // "Back to Lobby" — drop this match's replay from localStorage before leaving.
+  const backBtn = document.getElementById('replay-back-lobby');
+  if (backBtn) {
+    backBtn.onclick = () => { stopReplayAutoplay(); clearReplayLocal(); window.location.href = '/index'; };
+  }
+})();
+
+let myElo = null;
+let oppElo = null;
+socket.on('elo', (data) => {
+  // player1 = white = color 0, player2 = black = color 1
+  if (my_color === 0) {
+    myElo = data.player1;
+    oppElo = data.player2;
+  } else {
+    myElo = data.player2;
+    oppElo = data.player1;
+  }
 });
 
 // return from server on whether a move was validated or not
@@ -328,23 +497,28 @@ socket.on('validated', (boardState, turnState, extra) => {
         move_sound.play();
     }
     else {
-      if (((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank)
-        && (board[no_of_squares - 1 - to_position.y][no_of_squares - 1 - to_position.x] & 0b1111) != blank)
+      // black: from_position/to_position are VISUAL coords; boardState is in
+      // server orientation — orientToServer is the same 180-degree map for
+      // both directions (identity for white, so this keeps the legacy index
+      // arithmetic byte-for-byte) — single orientation seam: layout.js
+      let sf = window.ChessLayout.orientToServer(from_position.x, from_position.y, my_color);
+      let tf = window.ChessLayout.orientToServer(to_position.x, to_position.y, my_color);
+      if (((boardState[sf.y][sf.x] & 0b1111) == blank)
+        && (board[tf.y][tf.x] & 0b1111) != blank)
         capture_sound.play();
-      else if ((boardState[no_of_squares - 1 - from_position.y][no_of_squares - 1 - from_position.x] & 0b1111) == blank)
+      else if ((boardState[sf.y][sf.x] & 0b1111) == blank)
         move_sound.play();
     }
   }
   if (my_color == 0)
     board = boardState;
-  else {
-    for (let i = 0; i < no_of_squares; i++) {
-      for (let j = 0; j < no_of_squares; j++) {
-        board[i][j] = boardState[no_of_squares - i - 1][no_of_squares - j - 1];
-      }
-    }
-  }
+  else
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(boardState, my_color);
   is_being_validated = false;
+  // F3: adopt the server-authoritative lastMove (server coords, same shape as
+  // the local one) so EP targets of the opponent's double push are computed.
+  if (extra && extra.lastMove) lastMove = extra.lastMove;
   // Clear click-to-move selection after server response
   selectedSquare = null;
   legalMoveSquares.clear();
@@ -445,11 +619,8 @@ socket.on('takebackAccepted', (boardState, turnState) => {
   if (my_color == 0) {
     board = boardState;
   } else {
-    for (let i = 0; i < no_of_squares; i++) {
-      for (let j = 0; j < no_of_squares; j++) {
-        board[i][j] = boardState[no_of_squares - i - 1][no_of_squares - j - 1];
-      }
-    }
+    // Black sees rotated board (180°) — single orientation seam: layout.js
+    board = window.ChessLayout.rotateBoard(boardState, my_color);
   }
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';

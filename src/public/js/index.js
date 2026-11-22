@@ -1,22 +1,13 @@
 play = () => {
-  window.location.href = '/game';
-};
-
-function writeCookie(name, value, days) {
-  let date = new Date();
-  let expires = "";
-
-  if (days) {
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = "; expires=" + date.toGMTString();
+  // C5: if the author generated a private link, Play must join THAT match,
+  // not the public lobby.
+  // != null: matchId 0 (first private match after a restart) is a valid id.
+  if (window.__privateMatchId != null) {
+    window.location.href = '/game?matchId=' + window.__privateMatchId;
+  } else {
+    window.location.href = '/game';
   }
-
-  document.cookie = name + "=" + value + expires + "; path=/";
-}
-
-function readCookie(name) {
-  return document.cookie.split('; ').find(row => row.split('=')[0] === name);
-}
+};
 
 genLink = () => {
   socket.emit('private-match', 1);

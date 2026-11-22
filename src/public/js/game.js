@@ -1,4 +1,3 @@
-// no en passant, castling, or advance drawing yet
 const move_sound = new Audio('/audio/move-self.mp3');
 const capture_sound = new Audio('/audio/capture.mp3');
 const wrong_move_sound = new Audio('/audio/wrong_move_sound.mp3');
@@ -6,13 +5,25 @@ const wrong_move_sound = new Audio('/audio/wrong_move_sound.mp3');
 const canvas = document.getElementById("cnv");
 const ctx = canvas.getContext('2d');
 
-var dark_square_color = '#4f5969';
-var light_square_color = '#c1c8d4';
+var dark_square_color = '#55648a';
+var light_square_color = '#e9eef6';
 const move_square_color = '#7af4ae';
 const possible_move_color = '#74f551';
 const check_square_color = '#ff4444';
 
 const start_fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
+
+// TEST-ONLY (test/e2e-client.mjs): lets the harness read the client's board
+// global and known color without scraping the canvas. Deliberately tiny;
+// safe to delete if the headless harness is ever retired.
+window.__chessDebug = {
+    getBoard: () => board,
+    get myColor() { return my_color; }
+};
+
+// Single source of truth for canvas geometry and the server<->visual
+// coordinate orientation seam (window.ChessLayout, layout.js — loaded first).
+const layout = window.ChessLayout;
 
 let side_len, offset_x, offset_y;
 const no_of_squares = 8;
@@ -46,31 +57,33 @@ function sortCaptured(arr) {
 function recalcLayout() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  // Canvas must fit within vw minus 8px safe margin
-  const maxCanvas = Math.min(vw - 8, 480);
-  const maxH = vh * 0.7;
+  // Canvas must fit within vw minus 8px safe margin — all geometry now lives
+  // in layout.js (OFFSET / CELL_CAP / VIEW_HF); see the style constants there.
+  const maxCanvas = Math.min(vw - 8, layout.CELL_CAP);
+  const maxH = vh * layout.VIEW_HF;
   const total = Math.floor(Math.min(maxCanvas, maxH));
 
-  offset_x = 10;
-  offset_y = 10;
-  side_len = total - offset_x * 2 - 10;
+  offset_x = layout.OFFSET.x;
+  offset_y = layout.OFFSET.y;
+  side_len = layout.cellSize();
 
   const dpr = window.devicePixelRatio || 1;
   canvas.width = total * dpr;
   canvas.height = total * dpr;
   canvas.style.maxWidth = (vw - 8) + 'px';
-  canvas.style.maxHeight = (vh * 0.7) + 'px';
+  canvas.style.maxHeight = (vh * layout.VIEW_HF) + 'px';
   ctx.scale(dpr, dpr);
 }
 
 const delta_time = 10;
 
 let is_mouse_down = false;
-let was_mouse_down = false;
+let was_mouse_down = false; // legacy (kept for the 10ms loop's state); drag is event-driven (fix C)
 let is_holding_piece = false;
 let holding_piece = 0; // the value of the piece held
 let mouse_x, mouse_y;
 let curr_position;
+let dragSettled = false; // set by completeDrag(): the drop was finished+emitted in the mouseup handler
 let from_position = {'x' : 0, 'y' : 0}; // position being dragged from
 let to_position= {'x' : 0, 'y' : 0};    // position being dragged to
 let old_piece; // value of the piece at the target square originally
@@ -78,7 +91,6 @@ let new_piece; // value of the piece being dragged to the square
 let is_being_validated = false;
 let can_move = false; // to disable dragging when it's not your turn
 let my_color = null;  // white or black
-let matchId = null;
 
 // Click-to-move state
 let selectedSquare = null;        // {x, y} in visual coords or null
@@ -261,13 +273,12 @@ function draw() {
     }
 }
 
+// get_box_coords -> layout.pixelToSquare: canvas px -> visual square.
+// Returns [i, j] (legacy array shape, -1 when off-board) so existing call
+// sites keep working; the layout.js seam is the single source of the math.
 function get_box_coords() {
-    let x = mouse_x - offset_x;
-    let y = mouse_y - offset_y;
-    let side_len_square = side_len / no_of_squares;
-    let j = Math.floor(x / side_len_square);
-    let i = Math.floor(y / side_len_square);
-    return [i, j];
+    const p = layout.pixelToSquare(mouse_x, mouse_y);
+    return p ? [p.y, p.x] : [-1, -1];
 }
 
 function getVisualPieceColor(value) {
@@ -281,11 +292,29 @@ function selectPiece(x, y) {
     if (getVisualPieceColor(piece) !== my_color) return false;
     selectedSquare = {x: x, y: y};
     legalMoveSquares.clear();
-    let visualBoard = board;
+
+    // The engine (chessutils.js) works in SERVER orientation (row 7 = white home
+    // rank, white pawns on row 6, black pawns on row 1). For black the local
+    // `board` is rotated 180 degrees and (x, y) are visual coordinates, so undo
+    // the rotation before querying the engine and rotate the targets back for
+    // highlighting. Without this, black pawns sit on visual row 6 while the
+    // engine expects row 1: click-to-move highlights were wrong/empty for
+    // pawns and castling was never highlighted for black, so black could not
+    // make pawn moves via click at all. (The drag path in display_possible_moves
+    // already does this conversion.)
+    let engineBoard = board;
     let pos = Coord(x, y);
-    let moves = genLegalMoves(visualBoard, pos, null, lastMove);
+    if (my_color != 0) {
+        engineBoard = layout.rotateBoard(board, my_color);
+        let sp = layout.orientToServer(x, y, my_color);
+        pos.x = sp.x;
+        pos.y = sp.y;
+    }
+    let moves = genLegalMoves(engineBoard, pos, null, lastMove);
     for (let m of moves) {
-        legalMoveSquares.add(m.to.x + ',' + m.to.y);
+        // rotate the engine (server-orientation) targets back to visual coords
+        let t = layout.orientToVisual(m.to.x, m.to.y, my_color);
+        legalMoveSquares.add(t.x + ',' + t.y);
     }
     return true;
 }
@@ -299,29 +328,15 @@ function sendMoveToServer(fromX, fromY, toX, toY) {
     from_position = { x: fromX, y: fromY };
     to_position = { x: toX, y: toY };
 
-    // Capture piece and server-side coords for lastMove tracking
-    let visualPiece = board[fromY][fromX];
-    let serverFrom, serverTo;
-    if (my_color == 0) {
-        serverFrom = { x: fromX, y: fromY };
-        serverTo = { x: toX, y: toY };
-    } else {
-        serverFrom = { x: no_of_squares - fromX - 1, y: no_of_squares - fromY - 1 };
-        serverTo = { x: no_of_squares - toX - 1, y: no_of_squares - toY - 1 };
-    }
-    lastMove = { from: serverFrom, to: serverTo, piece: visualPiece };
-
-    if (my_color == 0) {
-        socket.emit('move', matchId, {x: fromX, y: fromY}, {x: toX, y: toY});
-    } else {
-        socket.emit('move', matchId, {
-                x: no_of_squares - fromX - 1,
-                y: no_of_squares - fromY - 1
-            }, {
-                x: no_of_squares - toX - 1,
-                y: no_of_squares - toY - 1
-            });
-    }
+    // visual -> server orientation (identity for white): single seam call
+    let serverFrom = layout.orientToServer(fromX, fromY, my_color);
+    let serverTo = layout.orientToServer(toX, toY, my_color);
+    // F3: lastMove is server-authoritative now — 'validated' carries
+    // match.lastMove for BOTH clients. Setting it locally here polluted the
+    // EP target whenever the server later rejected the move, so we no longer
+    // track it on click; the payload updates it for both sides atomically with
+    // the new board.
+    socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
 }
 
@@ -344,8 +359,71 @@ function executeClickToMove(clickX, clickY) {
     }
 }
 
+function grabDragPiece(px, py) {
+    // Called from the mousedown/touchstart handler. Sets the held-piece state
+    // immediately if the press is on a piece square (state is consumed by the
+    // render loop from the first mousemove onward). No board mutation yet —
+    // the loop's sprite redraw (is_holding_piece) does that, exactly as before.
+    let pos = layout.pixelToSquare(px, py);
+    if (!pos) return;
+    let i = pos.y, j = pos.x;
+    if ((board[i][j] & 0b1111) === 0)
+        return;
+    // set the holding piece to whatever is on that square
+    is_holding_piece = true;
+    holding_piece = board[i][j];
+    from_position = { x: j, y: i };
+}
+
+function completeDrag(px, py) {
+    // Called from the mouseup/touchend handler. Finishes the drop and emits
+    // the move IMMEDIATELY — no dependency on the 10ms render loop observing
+    // the down->up transition (that is the bug C fix).
+    let pos = layout.pixelToSquare(px, py);
+    let i = pos ? pos.y : -1, j = pos ? pos.x : -1;
+
+    // store the actions, these will be sent to the server
+    old_piece = (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares)
+        ? board[i][j] : blank; // mouseup outside the board -> treat as no capture
+    new_piece = holding_piece;
+    to_position = { x: j, y: i };
+    dragSettled = true;
+
+    // Detect capture
+    if ((old_piece & 0b0111) !== blank) {
+        const capturedType = old_piece & 0b0111;
+        if (my_color === white) {
+            capturedByWhite.push(capturedType);
+        } else {
+            capturedByBlack.push(capturedType);
+        }
+    }
+
+    // send movement data to the server (visual -> server via the seam;
+    // identity for white, 180-degree rotation for black)
+    // if(!coordEqual(from_position, to_position))
+    let serverFrom = layout.orientToServer(from_position.x, from_position.y, my_color);
+    let serverTo = layout.orientToServer(to_position.x, to_position.y, my_color);
+    // F3: no local lastMove bookkeeping here anymore — the authoritative
+    // value arrives with 'validated' (see sendMoveToServer comment).
+    socket.emit('move', matchId, serverFrom, serverTo);
+    is_being_validated = true;
+    // The drag is finished HERE. If the holding state lingers, handle_drag()
+    // blanks the square under the cursor on its next tick — and once the
+    // 'validated' broadcast has replaced the board, that blank wipes the
+    // freshly confirmed piece off the local board (E2E desync: dropped pawn
+    // disappeared one move later). handle_drag must never see a completed drop.
+    is_holding_piece = false;
+    dragSettled = false;
+    holding_piece = 0;
+}
+
 // The most complicated function ever
-// Handles drag
+// Handles drag. Fix C: the down->up state machine that emitted 'move' is now
+// event-driven (mousedown/touchstart -> grabDragPiece, mouseup/touchend ->
+// completeDrag). This loop only updates the hover position and redraws the
+// held-piece sprite at the cursor; the emit no longer depends on the 10 ms
+// interval observing both the down and the up transition.
 function handle_drag() {
 
     // Dont allow dragging while previous move is being validated
@@ -356,83 +434,14 @@ function handle_drag() {
     let coords = get_box_coords();
     let i = coords[0], j = coords[1];
 
-    // if mouse got clicked, update the from_position
-    // Only process drag actions if mouse actually moved (isDragging flag)
-    // Otherwise this eats the click before onmouseup can handle click-to-move
-    if (is_mouse_down && !isDragging) {
-        // Just update tracking vars, don't touch the board yet
-        was_mouse_down = is_mouse_down;
-        curr_position = { "x": j, "y": i };
-        return;
-    }
-
-    if(was_mouse_down == false && is_mouse_down == true){
-        if (can_move) {
-            from_position.x = curr_position.x;
-            from_position.y = curr_position.y;
-        }
-    }
-
-    // if mouse was released and the player was holding a piece
-    if(was_mouse_down == true && is_mouse_down == false && is_holding_piece){
-        
-        // store the actions, these will be sent to the server
-        old_piece = board[i][j];
-        new_piece = holding_piece;
-        to_position.x = curr_position.x;
-        to_position.y = curr_position.y;
-
-        // Detect capture
-        if ((old_piece & 0b0111) !== blank) {
-            const capturedType = old_piece & 0b0111;
-            if (my_color === white) {
-                capturedByWhite.push(capturedType);
-            } else {
-                capturedByBlack.push(capturedType);
-            }
-        }
-
-        // send movement data to the server
-        if (my_color == 0){
-            // if(!coordEqual(from_position, to_position))
-            socket.emit('move', matchId, from_position, to_position);
-        }
-        else
-            // Black has the board in a different perspective so
-            // adjust the coordinates accordingly
-            socket.emit('move', matchId, {
-                    x : no_of_squares - from_position.x - 1 ,
-                    y : no_of_squares - from_position.y - 1 
-                },
-                {
-                    x : no_of_squares - to_position.x - 1 ,
-                    y : no_of_squares - to_position.y - 1 
-                });
-        is_being_validated = true;
-    }
-
-    // store current mouse state as the old mouse state
-    was_mouse_down = is_mouse_down;
-
-    // update current position
+    // update the hover position (read by the sprite below)
     curr_position = {
         "x": j,
         "y": i
     }
 
     if (is_mouse_down) {
-        if (!is_holding_piece) {
-            // if not holding a piece, check if the current square has a piece
-            // & (0b1111) is done as other bits maybe used for other purposes
-            if ((board[i][j] & 0b1111) === 0) 
-                return;
-            
-            // set the holding piece to whatever is on that square
-            is_holding_piece = true;
-            holding_piece = board[i][j];
-            board[i][j] = 0;
-        }
-        else {
+        if (is_holding_piece) {
             // if already holding a piece and the mouse is held down,
             // display the held piece at the mouse
             ctx.fillStyle = 'black';
@@ -441,37 +450,36 @@ function handle_drag() {
             ctx.fillText(sprites[holding_piece], mouse_x - off_x, mouse_y);
         }
     }
-    else {
-        if (is_holding_piece) {
-            // If mouse is up and we are still holding a piece,
-            // Drop the piece 
-            is_holding_piece = false;
-            old_piece = board[i][j];
-            board[i][j] = holding_piece;
-            holding_piece = 0;
-        }
+    else if (is_holding_piece) {
+        // Reached ONLY for a cancelled grab: the mouse was released outside
+        // the canvas so the mouseup/ontouchend handlers never fired. A
+        // COMPLETED drop is finalized (and its holding state cleared) inside
+        // completeDrag(), so this branch must never mutate the board for it.
+        // Restore the piece on its original square (the render loop blanks
+        // that square while a piece is held).
+        board[from_position.y][from_position.x] = holding_piece;
+        is_holding_piece = false;
+        dragSettled = false;
+        holding_piece = 0;
     }
 }
 
 // Indicates all the allowed legal moves with green circles
 function display_possible_moves(){
     let side_len_square = side_len / no_of_squares;
-    let new_board = []
+    let new_board = board;
     let new_from_position = Coord(from_position.x, from_position.y);
     
-    // if color is black. make a rotated version of the board and coordinates ;
-    // else keep it same
-    if (my_color == 0)
+    // if color is black, the engine needs a rotated copy of the board and
+    // rotated from-coordinates (server orientation); else keep it the same
+    // — single orientation seam: layout.js
+    if (my_color == 0) {
         new_board = board;
-    else {
-        for (let i = 0; i < no_of_squares; i++) {
-            new_board.push([]);
-            for (let j = 0; j < no_of_squares; j++) {
-                new_board[i].push(board[no_of_squares - i - 1][no_of_squares - j - 1]);
-            }
-        }
-        new_from_position.x = no_of_squares - new_from_position.x - 1;
-        new_from_position.y = no_of_squares - new_from_position.y - 1;
+    } else {
+        new_board = layout.rotateBoard(board, my_color);
+        let sp = layout.orientToServer(from_position.x, from_position.y, my_color);
+        new_from_position.x = sp.x;
+        new_from_position.y = sp.y;
     }
 
     // Get all the legal moves from the current held piece
@@ -484,12 +492,10 @@ function display_possible_moves(){
         ctx.font = '15px sans-serif';
         let off_x = offset_x + (side_len_square) / 3;
         let off_y = offset_y * 1.5 + (side_len_square) / 3;
-        if(my_color == 0)
-            ctx.fillText('⬤', off_x + m.to.x * side_len_square,
-        off_y + m.to.y * side_len_square);
-        else
-        ctx.fillText('⬤', off_x + (no_of_squares - m.to.x - 1) * side_len_square,
-        off_y + (no_of_squares - m.to.y - 1) * side_len_square);
+        // rotate the engine target back to visual coordinates
+        let t = layout.orientToVisual(m.to.x, m.to.y, my_color);
+        ctx.fillText('⬤', off_x + t.x * side_len_square,
+        off_y + t.y * side_len_square);
             // ⬤
     }
 }
@@ -503,6 +509,19 @@ window.onload = () => {
     if (!saved) {
         draw();
         fen_to_board(start_fen);
+        // Bug A: if startGame arrived BEFORE onload, startGame already rotated
+        // the board for black — and fen_to_board() just overwrote it with the
+        // server-orientation start position, leaving black unrotated (wrong
+        // opening-move highlights until the first 'validated'). Invariant now
+        // enforced regardless of event order: whenever my_color is KNOWN to be
+        // black, the visual board equals rotateBoard(serverBoard, 1). Strict
+        // === 1 is required: my_color is null until startGame, and `null != 0`
+        // is TRUE, so the old loose guard rotated the board for a player whose
+        // color was not yet assigned (E2E: white page started 180-flipped
+        // until the first 'validated' overwrite).
+        if (my_color === 1) {
+            board = window.ChessLayout.rotateBoard(board, my_color);
+        }
         render_board();
     }
 }
@@ -512,15 +531,24 @@ canvas.onmousedown = (e) => {
     const rect = canvas.getBoundingClientRect();
     lastMouseDownPx = {x: e.clientX - rect.left, y: e.clientY - rect.top};
     isDragging = false;
+    dragSettled = false;
     mouse_x = lastMouseDownPx.x;
     mouse_y = lastMouseDownPx.y;
+    // fix C: down->up drag state machine lives in the event handlers now.
+    // mousedown selects/grabs the held piece immediately (if we have a turn);
+    // the 10ms loop only redraws the sprite from the first mousemove onward.
+    if (can_move && !is_being_validated && !is_holding_piece) {
+        grabDragPiece(lastMouseDownPx.x, lastMouseDownPx.y);
+    }
 }
 canvas.onmouseup = (e) => {
     is_mouse_down = false;
+    const rect = canvas.getBoundingClientRect();
+    const ux = e.clientX - rect.left;
+    const uy = e.clientY - rect.top;
     if (!isDragging && lastMouseDownPx && can_move) {
-        const rect = canvas.getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
+        // click-to-move (unchanged click-vs-drag CLICK_THRESHOLD semantics)
+        const cx = ux, cy = uy;
         let coords = get_box_coords();
         let i = coords[0], j = coords[1];
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
@@ -528,6 +556,9 @@ canvas.onmouseup = (e) => {
         }
     }
     if (isDragging) {
+        // fix C: complete the drop and emit the move right here in the
+        // handler — never lost to the 10ms tick boundary again.
+        if (can_move && is_holding_piece) completeDrag(ux, uy);
         clearSelection();
     }
     lastMouseDownPx = null;
@@ -541,6 +572,11 @@ canvas.ontouchstart = (e) => {
     mouse_y = touch.clientY - rect.top;
     lastMouseDownPx = {x: mouse_x, y: mouse_y};
     isDragging = false;
+    dragSettled = false;
+    // fix C: same event-driven grab as mousedown
+    if (can_move && !is_being_validated && !is_holding_piece) {
+        grabDragPiece(mouse_x, mouse_y);
+    }
 };
 canvas.ontouchend = (e) => {
     is_mouse_down = false;
@@ -556,6 +592,8 @@ canvas.ontouchend = (e) => {
         }
     }
     if (isDragging) {
+        // fix C: same event-driven drop + emit as mouseup
+        if (can_move && is_holding_piece) completeDrag(mouse_x, mouse_y);
         clearSelection();
     }
     lastMouseDownPx = null;
