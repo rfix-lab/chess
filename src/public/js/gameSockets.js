@@ -61,6 +61,9 @@ socket.on('startGame', (color, gameId) => {
   my_color = color;
   matchId = gameId;
   saveSession(gameId, color);
+  // F3: fresh match => no server lastMove yet; clear any stale value from a
+  // previous game (server sends it only with the first 'validated').
+  lastMove = null;
   capturedByWhite = [];
   capturedByBlack = [];
   if (color == 0) {
@@ -79,7 +82,7 @@ socket.on('startGame', (color, gameId) => {
 });
 
 // Server confirms reconnect — restores board state
-socket.on('reconnected', (color, gameId, boardState, turnState) => {
+socket.on('reconnected', (color, gameId, boardState, turnState, lastMoveData) => {
   clearSession(); // no longer need to reconnect
   my_color = color;
   matchId = gameId;
@@ -94,6 +97,9 @@ socket.on('reconnected', (color, gameId, boardState, turnState) => {
     // Black sees rotated board (180°) — single orientation seam: layout.js
     board = window.ChessLayout.rotateBoard(boardState, 1);
   }
+  // F3: server-authoritative lastMove (5th payload field) — keeps EP targets
+  // correct across reconnects (F5 mid-game right after a double push).
+  lastMove = lastMoveData || null;
 
   // Show action buttons
   const actionsPanel = document.getElementById('game-actions');
@@ -510,6 +516,9 @@ socket.on('validated', (boardState, turnState, extra) => {
     // Black sees rotated board (180°) — single orientation seam: layout.js
     board = window.ChessLayout.rotateBoard(boardState, my_color);
   is_being_validated = false;
+  // F3: adopt the server-authoritative lastMove (server coords, same shape as
+  // the local one) so EP targets of the opponent's double push are computed.
+  if (extra && extra.lastMove) lastMove = extra.lastMove;
   // Clear click-to-move selection after server response
   selectedSquare = null;
   legalMoveSquares.clear();

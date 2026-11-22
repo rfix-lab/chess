@@ -328,13 +328,14 @@ function sendMoveToServer(fromX, fromY, toX, toY) {
     from_position = { x: fromX, y: fromY };
     to_position = { x: toX, y: toY };
 
-    // Capture piece and server-side coords for lastMove tracking
-    let visualPiece = board[fromY][fromX];
     // visual -> server orientation (identity for white): single seam call
     let serverFrom = layout.orientToServer(fromX, fromY, my_color);
     let serverTo = layout.orientToServer(toX, toY, my_color);
-    lastMove = { from: serverFrom, to: serverTo, piece: visualPiece };
-
+    // F3: lastMove is server-authoritative now — 'validated' carries
+    // match.lastMove for BOTH clients. Setting it locally here polluted the
+    // EP target whenever the server later rejected the move, so we no longer
+    // track it on click; the payload updates it for both sides atomically with
+    // the new board.
     socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
 }
@@ -403,6 +404,8 @@ function completeDrag(px, py) {
     // if(!coordEqual(from_position, to_position))
     let serverFrom = layout.orientToServer(from_position.x, from_position.y, my_color);
     let serverTo = layout.orientToServer(to_position.x, to_position.y, my_color);
+    // F3: no local lastMove bookkeeping here anymore — the authoritative
+    // value arrives with 'validated' (see sendMoveToServer comment).
     socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
     // The drag is finished HERE. If the holding state lingers, handle_drag()

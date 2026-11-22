@@ -346,8 +346,8 @@ io.on('connection', socket => {
       dlog('move: pendingPromotion matchId=', matchId, 'color=', match.pendingPromotion.color);
       sentBoard = match.boardState.map((arr) => { return arr.slice(); });
       const promoColor = match.pendingPromotion.color;
-      match.player1Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
-      match.player2Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor });
+      match.player1Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor, lastMove: match.lastMove });
+      match.player2Socket.emit('validated', sentBoard, match.turnState, { pendingPromotion: true, promotionColor: promoColor, lastMove: match.lastMove });
       return;
     }
 
@@ -376,8 +376,12 @@ io.on('connection', socket => {
       }
     }
 
-    match.player1Socket.emit('validated', sentBoard, match.turnState);
-    match.player2Socket.emit('validated', sentBoard, match.turnState);
+    // F3: forward the server-authoritative lastMove so clients can compute
+    // en-passant targets for the OPPONENT's double push (previously lastMove
+    // only tracked the local player's click moves — EP highlight/capture was
+    // dead for the side that did not move).
+    match.player1Socket.emit('validated', sentBoard, match.turnState, { lastMove: match.lastMove });
+    match.player2Socket.emit('validated', sentBoard, match.turnState, { lastMove: match.lastMove });
 
     // Check game end: threefold repetition / insufficient material / 50-move / checkmate / stalemate
     const threefold = checkThreefoldDraw(match);
@@ -536,7 +540,7 @@ io.on('connection', socket => {
       }
     }
 
-    socket.emit('reconnected', color, gameId, cleanBoard, match.turnState);
+    socket.emit('reconnected', color, gameId, cleanBoard, match.turnState, match.lastMove);
     dlog('reconnect: OK socket=', socket.id, 'gameId=', gameId, 'color=', color);
   });
 
@@ -621,8 +625,8 @@ io.on('connection', socket => {
     }
     const opponent = match.player1Socket.id === socket.id ? match.player2Socket : match.player1Socket;
 
-    socket.emit('validated', board, match.turnState);
-    if (opponent) opponent.emit('validated', board, match.turnState);
+    socket.emit('validated', board, match.turnState, { lastMove: match.lastMove });
+    if (opponent) opponent.emit('validated', board, match.turnState, { lastMove: match.lastMove });
 
     // Check game end after promotion resolves (same paths as the 'move' handler)
     const threefold = checkThreefoldDraw(match);

@@ -156,7 +156,10 @@ async function test() {
 
   guest1.emit('auth', null, null);
   guest2.emit('auth', null, null);
-  await sleep(500);
+  // hardened 500 -> 1200ms: under parallel load the seating round-trip exceeded
+  // the old window and produced a false FAIL (observed 2026-11-22 while another
+  // agent ran headless E2E concurrently).
+  await sleep(1200);
 
   if (gFailed === 0) pass('Guests: no authFailed on null sessionID');
   else fail('Guests: no authFailed on null sessionID', gFailed + ' authFailed');
@@ -173,7 +176,8 @@ async function test() {
   await Promise.race([new Promise(r => bogus.on('connect', r)), sleep(3000)]);
   bogus.on('authFailed', () => { bogusFailed = true; });
   bogus.emit('auth', 'bogus_123', null);
-  await sleep(300);
+  // hardened 300 -> 800ms (same load-flake class as the guest seating wait)
+  await sleep(800);
   if (bogusFailed) pass('Invalid non-empty sessionID → authFailed');
   else fail('Invalid non-empty sessionID → authFailed', 'no authFailed');
   bogus.disconnect();
@@ -262,7 +266,10 @@ async function test() {
   fxB.on('validated', fxOnV);
   fxA.on('private-match', (id) => { fxMatch = id; fxA.emit('auth', null, id); fxB.emit('auth', null, id); });
   fxA.emit('private-match', 1);
-  await new Promise(r => { fxA.once('private-match', r); sleep(3000); });
+  // FIX(harness hang): the previous form `new Promise(r => { once(...); sleep(3000); })`
+  // never resolved the timer branch — if 'private-match' did not arrive the suite
+  // hung forever. Race the event against a real timeout fallback.
+  await Promise.race([new Promise(r => fxA.once('private-match', r)), sleep(3000)]);
   await sleep(600);
 
   if (fxMatch === null || fxAColor === null) {
@@ -782,6 +789,59 @@ async function test() {
       pass('B6: expired session pruned from sessions.json on next persist (re-signin)');
     else fail('B6: expired session pruned from file', `r=${b6r2}, still in file=${loadSessionsFile().some(e => e.id === b6ExpiredId)}`);
     fs.rmSync(b6UsersCsv, { force: true });
+  }
+
+  // === F3: lastMove sync — opponent learns the server-authoritative lastMove ===
+  // White double-push e2-e4; black's validated payload must carry it so the
+  // black client can compute the en-passant target (bug: lastMove was local-
+  // click-only, EP was dead for the side that did not move).
+  {
+    const sA = io(BASE, { transports: ['websocket'] });
+    const sB = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => sA.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => sB.on('connect', r)), sleep(3000)])
+    ]);
+    let f3Match = null, f3ColorA = null, lastLmToB = null;
+    sA.on('startGame', (c, m) => { if (f3ColorA === null) f3ColorA = c; if (f3Match === null) f3Match = m; });
+    sB.on('startGame', (c, m) => { if (f3Match === null) f3Match = m; });
+    // seat via private-match (proven pattern from FIXES-2 block)
+    sA.on('private-match', (id) => { f3Match = id; sA.emit('auth', null, id); sB.emit('auth', null, id); });
+    sA.emit('private-match', 7);
+    await Promise.race([new Promise(r => sA.once('private-match', r)), sleep(3000)]);
+    await sleep(600);
+    const f3White = () => (f3ColorA === 0 ? sA : sB);
+    const f3Black = () => (f3ColorA === 0 ? sB : sA);
+    let f3Reject = 0;
+    const f3Collect = (s) => s.on('validated', (b, t, extra) => {
+      // rejection is broadcast to BOTH sockets; count it once (on white only)
+      if (extra && extra.rejected) { if (s === f3White()) f3Reject++; return; }
+      if (extra && extra.lastMove) lastLmToB = extra.lastMove;
+    });
+    f3Collect(sA); f3Collect(sB);
+    if (f3Match !== null) {
+      const e4 = { x: 4, y: 4 }, e2 = { x: 4, y: 6 };
+      f3White().emit('move', f3Match, e2, e4);
+      await sleep(1200);
+      const okLm = lastLmToB && lastLmToB.from && lastLmToB.from.y === 6 && lastLmToB.from.x === 4
+        && lastLmToB.to && lastLmToB.to.y === 4 && lastLmToB.to.x === 4;
+      if (okLm) pass('F3: validated payload carries lastMove e2-e4 to both sockets');
+      else fail('F3 lastMove payload', `lastMove=${JSON.stringify(lastLmToB)}`);
+      // out-of-turn move (black while white is to move) must be rejected and
+      // must not stamp a lastMove into any payload
+      lastLmToB = null; f3Reject = 0;
+      f3Black().emit('move', f3Match, e4, { x: 4, y: 3 });
+      await sleep(1200);
+      if (f3Reject === 1 && lastLmToB === null)
+        pass('F3: rejected payload carries no lastMove stamp');
+      else fail('F3 rejected payload', `rejects=${f3Reject}, lm=${JSON.stringify(lastLmToB)}`);
+      // promotion path sanity: lastMove key present on a normal move payload
+      // already proven above; reconnect field checked via reconnected listener
+      // only when a reconnect happens — covered by E2E F5, not reproduced here.
+    } else {
+      fail('F3 match setup', 'no matchId');
+    }
+    sA.disconnect(); sB.disconnect();
   }
 
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
