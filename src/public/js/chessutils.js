@@ -141,18 +141,26 @@ function checkCheck(board, moveFromCoord, moveToCoord, turn){
         }
     }
 
-    // Handle en passant capture: remove the captured pawn
-    if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x) {
+    // Handle en passant capture: remove the captured pawn. This square is
+    // only clobbered for a TRUE en-passant capture (the destination was empty
+    // - the pawn is taken in transit). For a normal diagonal capture the
+    // captured piece sits on the destination square and was already replaced by
+    // the moving pawn above; clobbering the adjacent square here would wrongly
+    // delete a third piece from the check-test board.
+    if (getPiece(piece) === pawn && moveFromCoord.x !== moveToCoord.x
+        && board[moveToCoord.y][moveToCoord.x] === blank) {
         newBoard[moveFromCoord.y][moveToCoord.x] = blank;
     }
 
     let currColor = turnToColor(turn);
     let kingPos = Coord(0, 0);
-    for(let i = 0; i < noOfSquares; i++){
+    let found = false;
+    for(let i = 0; i < noOfSquares && !found; i++){
         for(let j =0; j < noOfSquares; j++){
             if(newBoard[j][i] == (king | currColor)){
                 kingPos.x = i;
                 kingPos.y = j;
+                found = true;
                 break;
             }
         }
@@ -238,7 +246,9 @@ function whitePawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
         return false;
 
     if (getColor(destValue) == -1 && moveFromCoord.y == 6 && differenceX == 0 && moveToCoord.y == 4) {
-        // pawns can move two moves ahead at the start
+        // pawns can move two moves ahead at the start; BOTH squares must be empty
+        if (board[5][moveFromCoord.x] != blank)
+            return false;
         return true;
     }
     // only one step ahead at atime and in only one direction
@@ -283,7 +293,9 @@ function blackPawnMoveValidate(board, moveFromCoord, moveToCoord, match) {
 
 
     if (getColor(destValue) == -1 && moveFromCoord.y == 1 && differenceX == 0 && moveToCoord.y == 3) {
-        // pawns can move two moves ahead at the start
+        // pawns can move two moves ahead at the start; BOTH squares must be empty
+        if (board[2][moveFromCoord.x] != blank)
+            return false;
         return true;
     }
 
@@ -570,11 +582,13 @@ function genAllLegalMoves(board, color){
 function isKingInCheck(board, turn) {
     let currColor = turnToColor(turn);
     let kingPos = Coord(0, 0);
-    for (let i = 0; i < noOfSquares; i++) {
+    let found = false;
+    for (let i = 0; i < noOfSquares && !found; i++) {
         for (let j = 0; j < noOfSquares; j++) {
             if (board[j][i] == (king | currColor)) {
                 kingPos.x = i;
                 kingPos.y = j;
+                found = true;
                 break;
             }
         }

@@ -8,7 +8,7 @@ import path from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
+import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, rook, bishop, knight, queen, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers } from './lib/matchmaking.js';
 import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, loadSessionsFile, attachSessionsToUsers, START_ELO } from './lib/auth.js';
 import { log as dlog } from './lib/debuglog.js';
@@ -252,6 +252,18 @@ io.on('connection', socket => {
     if (!match || !match.player1Socket || !match.player2Socket || match.gameEnded) {
       dlog('move: REJECTED (no active match or game ended) matchId=', matchId,
           'found=', !!match, 'ended=', !!(match && match.gameEnded));
+      return;
+    }
+
+    // S4: the socket must be the one assigned to the side to move (defense in
+    // depth — the engine only checks piece color, so a buggy/duplicated client
+    // could otherwise move during the opponent's turn).
+    const moverSocket = match.turnState === 0 ? match.player1Socket : match.player2Socket;
+    if (moverSocket.id !== socket.id) {
+      dlog('move: REJECTED reason=not-movers-socket matchId=', matchId, 'turnState=', match.turnState, 'socket=', socket.id);
+      const currentBoard = match.boardState.map((arr) => { return arr.slice(); });
+      match.player1Socket.emit('validated', currentBoard, match.turnState, { rejected: true });
+      match.player2Socket.emit('validated', currentBoard, match.turnState, { rejected: true });
       return;
     }
 
@@ -558,6 +570,20 @@ io.on('connection', socket => {
     const { from, to, color } = match.pendingPromotion;
     const pieceType = data.pieceType;
 
+    // S3: only the four legal promotion pieces (match the client's constants:
+    // queen=0b0011, rook=0b0100, knight=0b0110, bishop=0b0101). pieceType=0
+    // would store a BLANK square (pawn vanishes); 99 would read back as a queen.
+    if (![queen, rook, bishop, knight].includes(pieceType)) {
+      dlog('promotion:choose: REJECTED reason=bad-pieceType matchId=', match.matchId, 'pieceType=', pieceType);
+      return;
+    }
+    // S3: the choosing socket must be the promoted piece's owner.
+    const ownerSocket = color === 0 ? match.player1Socket : match.player2Socket;
+    if (ownerSocket.id !== socket.id) {
+      dlog('promotion:choose: REJECTED reason=not-owner matchId=', match.matchId, 'color=', color, 'socket=', socket.id);
+      return;
+    }
+
     dlog('promotion:choose: matchId=', match.matchId, 'pieceType=', pieceType, 'color=', color);
     match.boardState[to.y][to.x] = color | pieceType;
     match.pendingPromotion = null;
@@ -678,6 +704,13 @@ io.on('connection', socket => {
   socket.on('resign', (matchId) => {
     const match = matches.find(m => m.matchId === matchId);
     if (!match || match.gameEnded) return;
+
+    // S4: only the two seated sockets may resign; unknown sockets would be
+    // defaulted to color 0 (player1) below and could end someone else's game.
+    if (socket.id !== match.player1Socket.id && socket.id !== match.player2Socket.id) {
+      dlog('resign: REJECTED reason=not-movers-socket matchId=', matchId, 'socket=', socket.id);
+      return;
+    }
 
     const resignedColor = match.player1Socket.id === socket.id ? 0 : 1;
     dlog('resign: matchId=', matchId, 'resignedColor=', resignedColor);
