@@ -13,6 +13,10 @@ const check_square_color = '#ff4444';
 
 const start_fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
 
+// Single source of truth for canvas geometry and the server<->visual
+// coordinate orientation seam (window.ChessLayout, layout.js — loaded first).
+const layout = window.ChessLayout;
+
 let side_len, offset_x, offset_y;
 const no_of_squares = 8;
 const blank = 0b0000;
@@ -45,20 +49,21 @@ function sortCaptured(arr) {
 function recalcLayout() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  // Canvas must fit within vw minus 8px safe margin
-  const maxCanvas = Math.min(vw - 8, 480);
-  const maxH = vh * 0.7;
+  // Canvas must fit within vw minus 8px safe margin — all geometry now lives
+  // in layout.js (OFFSET / CELL_CAP / VIEW_HF); see the style constants there.
+  const maxCanvas = Math.min(vw - 8, layout.CELL_CAP);
+  const maxH = vh * layout.VIEW_HF;
   const total = Math.floor(Math.min(maxCanvas, maxH));
 
-  offset_x = 10;
-  offset_y = 10;
-  side_len = total - offset_x * 2 - 10;
+  offset_x = layout.OFFSET.x;
+  offset_y = layout.OFFSET.y;
+  side_len = layout.cellSize();
 
   const dpr = window.devicePixelRatio || 1;
   canvas.width = total * dpr;
   canvas.height = total * dpr;
   canvas.style.maxWidth = (vw - 8) + 'px';
-  canvas.style.maxHeight = (vh * 0.7) + 'px';
+  canvas.style.maxHeight = (vh * layout.VIEW_HF) + 'px';
   ctx.scale(dpr, dpr);
 }
 
@@ -292,24 +297,16 @@ function selectPiece(x, y) {
     let engineBoard = board;
     let pos = Coord(x, y);
     if (my_color != 0) {
-        engineBoard = [];
-        for (let i = 0; i < no_of_squares; i++) {
-            engineBoard.push([]);
-            for (let j = 0; j < no_of_squares; j++) {
-                engineBoard[i].push(board[no_of_squares - i - 1][no_of_squares - j - 1]);
-            }
-        }
-        pos.x = no_of_squares - x - 1;
-        pos.y = no_of_squares - y - 1;
+        engineBoard = layout.rotateBoard(board, my_color);
+        let sp = layout.orientToServer(x, y, my_color);
+        pos.x = sp.x;
+        pos.y = sp.y;
     }
     let moves = genLegalMoves(engineBoard, pos, null, lastMove);
     for (let m of moves) {
-        let tx = m.to.x, ty = m.to.y;
-        if (my_color != 0) {
-            tx = no_of_squares - tx - 1;
-            ty = no_of_squares - ty - 1;
-        }
-        legalMoveSquares.add(tx + ',' + ty);
+        // rotate the engine (server-orientation) targets back to visual coords
+        let t = layout.orientToVisual(m.to.x, m.to.y, my_color);
+        legalMoveSquares.add(t.x + ',' + t.y);
     }
     return true;
 }
@@ -325,27 +322,12 @@ function sendMoveToServer(fromX, fromY, toX, toY) {
 
     // Capture piece and server-side coords for lastMove tracking
     let visualPiece = board[fromY][fromX];
-    let serverFrom, serverTo;
-    if (my_color == 0) {
-        serverFrom = { x: fromX, y: fromY };
-        serverTo = { x: toX, y: toY };
-    } else {
-        serverFrom = { x: no_of_squares - fromX - 1, y: no_of_squares - fromY - 1 };
-        serverTo = { x: no_of_squares - toX - 1, y: no_of_squares - toY - 1 };
-    }
+    // visual -> server orientation (identity for white): single seam call
+    let serverFrom = layout.orientToServer(fromX, fromY, my_color);
+    let serverTo = layout.orientToServer(toX, toY, my_color);
     lastMove = { from: serverFrom, to: serverTo, piece: visualPiece };
 
-    if (my_color == 0) {
-        socket.emit('move', matchId, {x: fromX, y: fromY}, {x: toX, y: toY});
-    } else {
-        socket.emit('move', matchId, {
-                x: no_of_squares - fromX - 1,
-                y: no_of_squares - fromY - 1
-            }, {
-                x: no_of_squares - toX - 1,
-                y: no_of_squares - toY - 1
-            });
-    }
+    socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
 }
 
@@ -416,22 +398,12 @@ function handle_drag() {
             }
         }
 
-        // send movement data to the server
-        if (my_color == 0){
-            // if(!coordEqual(from_position, to_position))
-            socket.emit('move', matchId, from_position, to_position);
-        }
-        else
-            // Black has the board in a different perspective so
-            // adjust the coordinates accordingly
-            socket.emit('move', matchId, {
-                    x : no_of_squares - from_position.x - 1 ,
-                    y : no_of_squares - from_position.y - 1 
-                },
-                {
-                    x : no_of_squares - to_position.x - 1 ,
-                    y : no_of_squares - to_position.y - 1 
-                });
+        // send movement data to the server (visual -> server via the seam;
+        // identity for white, 180-degree rotation for black)
+        // if(!coordEqual(from_position, to_position))
+        let serverFrom = layout.orientToServer(from_position.x, from_position.y, my_color);
+        let serverTo = layout.orientToServer(to_position.x, to_position.y, my_color);
+        socket.emit('move', matchId, serverFrom, serverTo);
         is_being_validated = true;
     }
 
@@ -480,22 +452,19 @@ function handle_drag() {
 // Indicates all the allowed legal moves with green circles
 function display_possible_moves(){
     let side_len_square = side_len / no_of_squares;
-    let new_board = []
+    let new_board = board;
     let new_from_position = Coord(from_position.x, from_position.y);
     
-    // if color is black. make a rotated version of the board and coordinates ;
-    // else keep it same
-    if (my_color == 0)
+    // if color is black, the engine needs a rotated copy of the board and
+    // rotated from-coordinates (server orientation); else keep it the same
+    // — single orientation seam: layout.js
+    if (my_color == 0) {
         new_board = board;
-    else {
-        for (let i = 0; i < no_of_squares; i++) {
-            new_board.push([]);
-            for (let j = 0; j < no_of_squares; j++) {
-                new_board[i].push(board[no_of_squares - i - 1][no_of_squares - j - 1]);
-            }
-        }
-        new_from_position.x = no_of_squares - new_from_position.x - 1;
-        new_from_position.y = no_of_squares - new_from_position.y - 1;
+    } else {
+        new_board = layout.rotateBoard(board, my_color);
+        let sp = layout.orientToServer(from_position.x, from_position.y, my_color);
+        new_from_position.x = sp.x;
+        new_from_position.y = sp.y;
     }
 
     // Get all the legal moves from the current held piece
@@ -508,12 +477,10 @@ function display_possible_moves(){
         ctx.font = '15px sans-serif';
         let off_x = offset_x + (side_len_square) / 3;
         let off_y = offset_y * 1.5 + (side_len_square) / 3;
-        if(my_color == 0)
-            ctx.fillText('⬤', off_x + m.to.x * side_len_square,
-        off_y + m.to.y * side_len_square);
-        else
-        ctx.fillText('⬤', off_x + (no_of_squares - m.to.x - 1) * side_len_square,
-        off_y + (no_of_squares - m.to.y - 1) * side_len_square);
+        // rotate the engine target back to visual coordinates
+        let t = layout.orientToVisual(m.to.x, m.to.y, my_color);
+        ctx.fillText('⬤', off_x + t.x * side_len_square,
+        off_y + t.y * side_len_square);
             // ⬤
     }
 }
