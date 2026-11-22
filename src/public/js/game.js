@@ -13,6 +13,14 @@ const check_square_color = '#ff4444';
 
 const start_fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
 
+// TEST-ONLY (test/e2e-client.mjs): lets the harness read the client's board
+// global and known color without scraping the canvas. Deliberately tiny;
+// safe to delete if the headless harness is ever retired.
+window.__chessDebug = {
+    getBoard: () => board,
+    get myColor() { return my_color; }
+};
+
 // Single source of truth for canvas geometry and the server<->visual
 // coordinate orientation seam (window.ChessLayout, layout.js — loaded first).
 const layout = window.ChessLayout;
@@ -397,6 +405,14 @@ function completeDrag(px, py) {
     let serverTo = layout.orientToServer(to_position.x, to_position.y, my_color);
     socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
+    // The drag is finished HERE. If the holding state lingers, handle_drag()
+    // blanks the square under the cursor on its next tick — and once the
+    // 'validated' broadcast has replaced the board, that blank wipes the
+    // freshly confirmed piece off the local board (E2E desync: dropped pawn
+    // disappeared one move later). handle_drag must never see a completed drop.
+    is_holding_piece = false;
+    dragSettled = false;
+    holding_piece = 0;
 }
 
 // The most complicated function ever
@@ -432,19 +448,13 @@ function handle_drag() {
         }
     }
     else if (is_holding_piece) {
-        // The mouse is up; completeDrag() has already finalized the drop in
-        // the mouseup handler (to_position set, 'move' emitted):
-        if (dragSettled) {
-            // drop: clear the square under the cursor (the board now carries
-            // the dropped piece there; validated will overwrite soon after)
-            if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares)
-                board[i][j] = blank;
-        } else {
-            // cancelled drop (mouseup outside the board): the original square
-            // is still empty (board[from] was blanked when the sprite started
-            // tracking) — restore the piece there
-            board[from_position.y][from_position.x] = holding_piece;
-        }
+        // Reached ONLY for a cancelled grab: the mouse was released outside
+        // the canvas so the mouseup/ontouchend handlers never fired. A
+        // COMPLETED drop is finalized (and its holding state cleared) inside
+        // completeDrag(), so this branch must never mutate the board for it.
+        // Restore the piece on its original square (the render loop blanks
+        // that square while a piece is held).
+        board[from_position.y][from_position.x] = holding_piece;
         is_holding_piece = false;
         dragSettled = false;
         holding_piece = 0;
@@ -500,9 +510,13 @@ window.onload = () => {
         // the board for black — and fen_to_board() just overwrote it with the
         // server-orientation start position, leaving black unrotated (wrong
         // opening-move highlights until the first 'validated'). Invariant now
-        // enforced regardless of event order: whenever my_color is known, the
-        // visual board equals rotateBoard(serverBoard, my_color).
-        if (my_color != 0) {
+        // enforced regardless of event order: whenever my_color is KNOWN to be
+        // black, the visual board equals rotateBoard(serverBoard, 1). Strict
+        // === 1 is required: my_color is null until startGame, and `null != 0`
+        // is TRUE, so the old loose guard rotated the board for a player whose
+        // color was not yet assigned (E2E: white page started 180-flipped
+        // until the first 'validated' overwrite).
+        if (my_color === 1) {
             board = window.ChessLayout.rotateBoard(board, my_color);
         }
         render_board();

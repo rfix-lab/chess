@@ -92,7 +92,10 @@
   // opaque ints — each cell is copied wholesale, never decomposed. Does NOT
   // mutate the input.
   function rotateBoard(board, color) {
-    if (color === 0) return board.map(function (row) { return row.slice(); });
+    // Only BLACK (=== 1) flips. Strict: my_color is null before startGame;
+    // an unknown color must be identity (loose/`!== 0` checks rotated boards
+    // for uncolored pages — the bug-A class).
+    if (color !== 1) return board.map(function (row) { return row.slice(); });
     const out = [];
     for (let i = SIZE - 1; i >= 0; i--) out.push(board[i].slice().reverse());
     return out;
