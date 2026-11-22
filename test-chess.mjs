@@ -238,6 +238,163 @@ async function test() {
   privB.disconnect();
   privA2.disconnect();
 
+  // === T-FIXES: engine/server hardening regressions (2026-11-22) ===
+  // One private match; the first socket to seat is color 0 (white).
+  // Server coords: rank r => y = 8 - r (e2 = {x:4, y:6}).
+  // One rejected move is broadcast to BOTH players, so it bumps the shared
+  // counter by 2 - assertions below compare against that.
+  const fxA = io(BASE, { transports: ['websocket'] });
+  const fxB = io(BASE, { transports: ['websocket'] });
+  await Promise.all([
+    Promise.race([new Promise(r => fxA.on('connect', r)), sleep(3000)]),
+    Promise.race([new Promise(r => fxB.on('connect', r)), sleep(3000)])
+  ]);
+  let fxMatch = null, fxAColor = null;
+  let fxRejects = 0, fxPendings = 0, fxLastBoard = null;
+  const fxOnV = (board, t, extra) => {
+    if (board) fxLastBoard = board.map(r => r.slice());
+    if (extra && extra.rejected) fxRejects++;
+    if (extra && extra.pendingPromotion) fxPendings++;
+  };
+  fxA.on('startGame', (c, m) => { fxAColor = c; if (fxMatch === null) fxMatch = m; });
+  fxB.on('startGame', (c, m) => { if (fxMatch === null) fxMatch = m; });
+  fxA.on('validated', fxOnV);
+  fxB.on('validated', fxOnV);
+  fxA.on('private-match', (id) => { fxMatch = id; fxA.emit('auth', null, id); fxB.emit('auth', null, id); });
+  fxA.emit('private-match', 1);
+  await new Promise(r => { fxA.once('private-match', r); sleep(3000); });
+  await sleep(600);
+
+  if (fxMatch === null || fxAColor === null) {
+    fail('FIXES: private match seated', 'no startGame');
+  } else {
+    const white = fxAColor === 0 ? fxA : fxB;
+    const black = fxAColor === 0 ? fxB : fxA;
+    const w = (f, t) => white.emit('move', fxMatch, { x: f[0], y: f[1] }, { x: t[0], y: t[1] });
+    const b = (f, t) => black.emit('move', fxMatch, { x: f[0], y: f[1] }, { x: t[0], y: t[1] });
+
+    // (1) BUG #1: 1.Nf3 puts the knight on f3, blocking the f-file. The pawn
+    // double push f2->f4 must be REJECTED (destination f4 empty, intermediate
+    // f3 occupied). Pre-fix only the destination square was checked, so f2-f4
+    // sailed through the blocker.
+    w([6, 7], [5, 5]);            // 1.Nf3 (g1->f3)
+    await sleep(340);
+    b([7, 1], [7, 3]);            // 1...h5 (kingside tempo; keeps the a-file clear)
+    await sleep(340);
+    const r1 = fxRejects;
+    w([5, 6], [5, 4]);            // 2.f4 - illegal (f3 blocked by the knight)
+    await sleep(400);
+    if (fxRejects >= r1 + 2)
+      pass('FIXES: blocked double-push rejected (Nf3 blocks f3 -> f2-f4 rejected)');
+    else fail('FIXES: blocked double-push rejected', `rejects=${fxRejects} (before=${r1}, expected >= ${r1 + 2})`);
+
+        // Promotion on the a-file: the b-pawn is used as bait - it advances to b6
+    // where black's a-pawn captures it (axb6), clearing the a-file for the rest
+    // of the way.  White's a-pawn then advances a4-a5-a6-a7 and captures the b8
+    // knight to promote on b8.  Black replies with quiet Nf6/g8 shuffles.
+    w([1, 6], [1, 4]);            // 2.b4
+    await sleep(340);
+    b([6, 0], [5, 2]);            // 2...Ng8f6
+    await sleep(340);
+    w([1, 4], [1, 3]);            // 3.b5
+    await sleep(340);
+    b([5, 2], [6, 0]);            // 3...Nf6g8
+    await sleep(340);
+    w([1, 3], [1, 2]);            // 4.b6 (bait: b6 is now capturable by the a-pawn)
+    await sleep(340);
+    b([0, 1], [1, 2]);            // 4...axb6 (clears a7 for the a-pawn)
+    await sleep(340);
+    w([0, 6], [0, 4]);            // 5.a4
+    await sleep(340);
+    b([6, 0], [5, 2]);            // 5...Ng8f6
+    await sleep(340);
+    w([0, 4], [0, 3]);            // 6.a5
+    await sleep(340);
+    b([5, 2], [6, 0]);            // 6...Nf6g8
+    await sleep(340);
+    w([0, 3], [0, 2]);            // 7.a6
+    await sleep(340);
+    b([6, 0], [5, 2]);            // 7...Ng8f6
+    await sleep(340);
+    w([0, 2], [0, 1]);            // 8.a7
+    await sleep(340);
+    b([5, 2], [6, 0]);            // 8...Nf6g8
+    await sleep(340);
+    const p0 = fxPendings;
+    w([0, 1], [1, 0]);            // 9.axb8 (captures the b8 knight -> promotes on b8)
+    await sleep(400);
+    if (fxPendings === p0 + 2)
+      pass('FIXES: promotion reached (axb8 pending promotion emitted)');
+    else fail('FIXES: promotion reached', `pendings=${fxPendings} (before=${p0}, expected ${p0+2} — one per seated socket)`);
+
+    // (2) S3 whitelist: pieceType 0 (blank: the pawn vanishes) and 99 (reads
+    // back as a queen) must BOTH be rejected WITHOUT consuming the pending -
+    // b8 must still hold the white pawn (piece value 1).
+    white.emit('promotion:choose', { gameId: fxMatch, pieceType: 0 });
+    await sleep(320);
+    white.emit('promotion:choose', { gameId: fxMatch, pieceType: 99 });
+    await sleep(320);
+    const b8AfterBad = fxLastBoard ? fxLastBoard[0][1] : -1;
+    if (b8AfterBad === 1)
+      pass('FIXES: promotion whitelist rejects pieceType 0 and 99 (b8 still a white pawn)');
+    else fail('FIXES: promotion whitelist rejects 0 and 99', `b8=${b8AfterBad} (expected pawn=1)`);
+
+    // (3) S3 ownership: the WRONG socket (black) picking a legal piece (queen)
+    // must be rejected; then the owner (white) picks a knight. If ownership were
+    // missing, black's pick would put a queen on b8 and consume the pending -
+    // the board must end holding the owner's knight (piece value 6).
+    black.emit('promotion:choose', { gameId: fxMatch, pieceType: 3 });
+    await sleep(320);
+    white.emit('promotion:choose', { gameId: fxMatch, pieceType: 6 });
+    await sleep(400);
+    const b8AfterOwner = fxLastBoard ? fxLastBoard[0][1] : -1;
+    if (b8AfterOwner === 6)
+      pass('FIXES: wrong-socket promotion:choose rejected (b8 = the owner knight, not the black-socket queen)');
+    else fail('FIXES: wrong-socket promotion rejected', `b8=${b8AfterOwner} (expected knight=6)`);
+
+    fxA.disconnect(); fxB.disconnect();
+  }
+
+  // === FIXES-2: S4 wrong-socket move on a FRESH match (clean turn state) ===
+  {
+    const gxA = io(BASE, { transports: ['websocket'] });
+    const gxB = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => gxA.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => gxB.on('connect', r)), sleep(3000)])
+    ]);
+    let gxMatch = null, gxAColor = null, gxRejects = 0;
+    gxA.on('startGame', (c, m) => { gxAColor = c; if (gxMatch === null) gxMatch = m; });
+    gxB.on('startGame', (c, m) => { if (gxMatch === null) gxMatch = m; });
+    gxA.on('validated', (b, t, extra) => { if (extra && extra.rejected) gxRejects++; });
+    gxB.on('validated', (b, t, extra) => { if (extra && extra.rejected) gxRejects++; });
+    gxA.on('private-match', (id) => { gxMatch = id; gxA.emit('auth', null, id); gxB.emit('auth', null, id); });
+    gxA.emit('private-match', 2);
+    await new Promise(r => { gxA.once('private-match', r); sleep(3000); });
+    await sleep(600);
+    if (gxMatch === null || gxAColor === null) {
+      fail('FIXES-2: fresh match seated', 'no startGame');
+    } else {
+      const gw = gxAColor === 0 ? gxA : gxB;
+      const gb = gxAColor === 0 ? gxB : gxA;
+      // Black's socket plays a legal black move (e7-e5) on WHITE's turn.
+      const g0 = gxRejects;
+      gb.emit('move', gxMatch, { x: 4, y: 1 }, { x: 4, y: 3 });
+      await sleep(400);
+      if (gxRejects >= g0 + 2)
+        pass('FIXES-2: wrong-socket move rejected on fresh match (black socket, white turn)');
+      else fail('FIXES-2: wrong-socket move rejected', `rejects=${gxRejects} (before=${g0})`);
+      // The correct socket still plays its own move (guard must not over-reject).
+      const g1 = gxRejects;
+      gw.emit('move', gxMatch, { x: 4, y: 6 }, { x: 4, y: 4 });
+      await sleep(400);
+      if (gxRejects === g1)
+        pass('FIXES-2: correct-socket move still accepted (white e2-e4 after guard)');
+      else fail('FIXES-2: correct-socket move accepted', `rejects=${gxRejects} (expected ${g1})`);
+      gxA.disconnect(); gxB.disconnect();
+    }
+  }
+
   // === T-F1: user persistence (users.csv) + autocomplete ===
   // (a) signup wrote a row with a bcrypt hash (never plaintext)
   let f1ok = true; let f1err = '';

@@ -10,6 +10,7 @@
 // of the old 3/8: server frozen while test-chess ran).
 import { spawn } from 'child_process';
 import fs from 'fs';
+import { POSITIONS, FAST_SUBSET, runPerft } from './perft.mjs';
 
 // F1: point the server's user-persistence dir at a throwaway tmp dir so the
 // suites never touch a real /app/data or repo-local users.csv.
@@ -37,6 +38,26 @@ const BASE = `http://localhost:${port}`;
 console.log(`[runner] in-process test server up at ${BASE} (ephemeral)`);
 
 const results = [];
+
+// Perft engine check (pure CPU, runs in-process before the socket suites):
+// d1-d2 for all six canonical positions + startpos d3 (npm-test budget).
+{
+  console.log('\n[runner] perft (engine move generator vs canonical counts)');
+  const depthMap = {};
+  for (const name of Object.keys(POSITIONS)) depthMap[name] = FAST_SUBSET[name] || [];
+  const perftResults = runPerft(Object.keys(POSITIONS), depthMap, { quiet: true, budgetMs: 60000 });
+  const perftFailed = perftResults.filter(r => !r.ok);
+  for (const r of perftResults) {
+    console.log(`  ${r.name} d${r.d}: ${r.actual} (expected ${r.expected}) ${r.ok ? 'OK' : 'MISMATCH'}  ${r.ms}ms`);
+  }
+  if (perftFailed.length) {
+    console.error(`[runner] perft: ${perftFailed.length} MISMATCH(es)`);
+    results.push({ file: 'perft', status: 1, signal: null });
+  } else {
+    console.log(`[runner] perft: all ${perftResults.length} checks EXACT`);
+  }
+}
+
 for (const file of ['test-evergreen.mjs', 'test-chess.mjs']) {
   const r = await runSuite(file, { ...process.env, TEST_URL: BASE }, new URL('..', import.meta.url).pathname);
   results.push(r);
