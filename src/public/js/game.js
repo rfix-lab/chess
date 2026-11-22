@@ -70,11 +70,12 @@ function recalcLayout() {
 const delta_time = 10;
 
 let is_mouse_down = false;
-let was_mouse_down = false;
+let was_mouse_down = false; // legacy (kept for the 10ms loop's state); drag is event-driven (fix C)
 let is_holding_piece = false;
 let holding_piece = 0; // the value of the piece held
 let mouse_x, mouse_y;
 let curr_position;
+let dragSettled = false; // set by completeDrag(): the drop was finished+emitted in the mouseup handler
 let from_position = {'x' : 0, 'y' : 0}; // position being dragged from
 let to_position= {'x' : 0, 'y' : 0};    // position being dragged to
 let old_piece; // value of the piece at the target square originally
@@ -264,13 +265,12 @@ function draw() {
     }
 }
 
+// get_box_coords -> layout.pixelToSquare: canvas px -> visual square.
+// Returns [i, j] (legacy array shape, -1 when off-board) so existing call
+// sites keep working; the layout.js seam is the single source of the math.
 function get_box_coords() {
-    let x = mouse_x - offset_x;
-    let y = mouse_y - offset_y;
-    let side_len_square = side_len / no_of_squares;
-    let j = Math.floor(x / side_len_square);
-    let i = Math.floor(y / side_len_square);
-    return [i, j];
+    const p = layout.pixelToSquare(mouse_x, mouse_y);
+    return p ? [p.y, p.x] : [-1, -1];
 }
 
 function getVisualPieceColor(value) {
@@ -350,8 +350,61 @@ function executeClickToMove(clickX, clickY) {
     }
 }
 
+function grabDragPiece(px, py) {
+    // Called from the mousedown/touchstart handler. Sets the held-piece state
+    // immediately if the press is on a piece square (state is consumed by the
+    // render loop from the first mousemove onward). No board mutation yet —
+    // the loop's sprite redraw (is_holding_piece) does that, exactly as before.
+    let pos = layout.pixelToSquare(px, py);
+    if (!pos) return;
+    let i = pos.y, j = pos.x;
+    if ((board[i][j] & 0b1111) === 0)
+        return;
+    // set the holding piece to whatever is on that square
+    is_holding_piece = true;
+    holding_piece = board[i][j];
+    from_position = { x: j, y: i };
+}
+
+function completeDrag(px, py) {
+    // Called from the mouseup/touchend handler. Finishes the drop and emits
+    // the move IMMEDIATELY — no dependency on the 10ms render loop observing
+    // the down->up transition (that is the bug C fix).
+    let pos = layout.pixelToSquare(px, py);
+    let i = pos ? pos.y : -1, j = pos ? pos.x : -1;
+
+    // store the actions, these will be sent to the server
+    old_piece = (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares)
+        ? board[i][j] : blank; // mouseup outside the board -> treat as no capture
+    new_piece = holding_piece;
+    to_position = { x: j, y: i };
+    dragSettled = true;
+
+    // Detect capture
+    if ((old_piece & 0b0111) !== blank) {
+        const capturedType = old_piece & 0b0111;
+        if (my_color === white) {
+            capturedByWhite.push(capturedType);
+        } else {
+            capturedByBlack.push(capturedType);
+        }
+    }
+
+    // send movement data to the server (visual -> server via the seam;
+    // identity for white, 180-degree rotation for black)
+    // if(!coordEqual(from_position, to_position))
+    let serverFrom = layout.orientToServer(from_position.x, from_position.y, my_color);
+    let serverTo = layout.orientToServer(to_position.x, to_position.y, my_color);
+    socket.emit('move', matchId, serverFrom, serverTo);
+    is_being_validated = true;
+}
+
 // The most complicated function ever
-// Handles drag
+// Handles drag. Fix C: the down->up state machine that emitted 'move' is now
+// event-driven (mousedown/touchstart -> grabDragPiece, mouseup/touchend ->
+// completeDrag). This loop only updates the hover position and redraws the
+// held-piece sprite at the cursor; the emit no longer depends on the 10 ms
+// interval observing both the down and the up transition.
 function handle_drag() {
 
     // Dont allow dragging while previous move is being validated
@@ -362,73 +415,14 @@ function handle_drag() {
     let coords = get_box_coords();
     let i = coords[0], j = coords[1];
 
-    // if mouse got clicked, update the from_position
-    // Only process drag actions if mouse actually moved (isDragging flag)
-    // Otherwise this eats the click before onmouseup can handle click-to-move
-    if (is_mouse_down && !isDragging) {
-        // Just update tracking vars, don't touch the board yet
-        was_mouse_down = is_mouse_down;
-        curr_position = { "x": j, "y": i };
-        return;
-    }
-
-    if(was_mouse_down == false && is_mouse_down == true){
-        if (can_move) {
-            from_position.x = curr_position.x;
-            from_position.y = curr_position.y;
-        }
-    }
-
-    // if mouse was released and the player was holding a piece
-    if(was_mouse_down == true && is_mouse_down == false && is_holding_piece){
-        
-        // store the actions, these will be sent to the server
-        old_piece = board[i][j];
-        new_piece = holding_piece;
-        to_position.x = curr_position.x;
-        to_position.y = curr_position.y;
-
-        // Detect capture
-        if ((old_piece & 0b0111) !== blank) {
-            const capturedType = old_piece & 0b0111;
-            if (my_color === white) {
-                capturedByWhite.push(capturedType);
-            } else {
-                capturedByBlack.push(capturedType);
-            }
-        }
-
-        // send movement data to the server (visual -> server via the seam;
-        // identity for white, 180-degree rotation for black)
-        // if(!coordEqual(from_position, to_position))
-        let serverFrom = layout.orientToServer(from_position.x, from_position.y, my_color);
-        let serverTo = layout.orientToServer(to_position.x, to_position.y, my_color);
-        socket.emit('move', matchId, serverFrom, serverTo);
-        is_being_validated = true;
-    }
-
-    // store current mouse state as the old mouse state
-    was_mouse_down = is_mouse_down;
-
-    // update current position
+    // update the hover position (read by the sprite below)
     curr_position = {
         "x": j,
         "y": i
     }
 
     if (is_mouse_down) {
-        if (!is_holding_piece) {
-            // if not holding a piece, check if the current square has a piece
-            // & (0b1111) is done as other bits maybe used for other purposes
-            if ((board[i][j] & 0b1111) === 0) 
-                return;
-            
-            // set the holding piece to whatever is on that square
-            is_holding_piece = true;
-            holding_piece = board[i][j];
-            board[i][j] = 0;
-        }
-        else {
+        if (is_holding_piece) {
             // if already holding a piece and the mouse is held down,
             // display the held piece at the mouse
             ctx.fillStyle = 'black';
@@ -437,15 +431,23 @@ function handle_drag() {
             ctx.fillText(sprites[holding_piece], mouse_x - off_x, mouse_y);
         }
     }
-    else {
-        if (is_holding_piece) {
-            // If mouse is up and we are still holding a piece,
-            // Drop the piece 
-            is_holding_piece = false;
-            old_piece = board[i][j];
-            board[i][j] = holding_piece;
-            holding_piece = 0;
+    else if (is_holding_piece) {
+        // The mouse is up; completeDrag() has already finalized the drop in
+        // the mouseup handler (to_position set, 'move' emitted):
+        if (dragSettled) {
+            // drop: clear the square under the cursor (the board now carries
+            // the dropped piece there; validated will overwrite soon after)
+            if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares)
+                board[i][j] = blank;
+        } else {
+            // cancelled drop (mouseup outside the board): the original square
+            // is still empty (board[from] was blanked when the sprite started
+            // tracking) — restore the piece there
+            board[from_position.y][from_position.x] = holding_piece;
         }
+        is_holding_piece = false;
+        dragSettled = false;
+        holding_piece = 0;
     }
 }
 
@@ -512,15 +514,24 @@ canvas.onmousedown = (e) => {
     const rect = canvas.getBoundingClientRect();
     lastMouseDownPx = {x: e.clientX - rect.left, y: e.clientY - rect.top};
     isDragging = false;
+    dragSettled = false;
     mouse_x = lastMouseDownPx.x;
     mouse_y = lastMouseDownPx.y;
+    // fix C: down->up drag state machine lives in the event handlers now.
+    // mousedown selects/grabs the held piece immediately (if we have a turn);
+    // the 10ms loop only redraws the sprite from the first mousemove onward.
+    if (can_move && !is_being_validated && !is_holding_piece) {
+        grabDragPiece(lastMouseDownPx.x, lastMouseDownPx.y);
+    }
 }
 canvas.onmouseup = (e) => {
     is_mouse_down = false;
+    const rect = canvas.getBoundingClientRect();
+    const ux = e.clientX - rect.left;
+    const uy = e.clientY - rect.top;
     if (!isDragging && lastMouseDownPx && can_move) {
-        const rect = canvas.getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
+        // click-to-move (unchanged click-vs-drag CLICK_THRESHOLD semantics)
+        const cx = ux, cy = uy;
         let coords = get_box_coords();
         let i = coords[0], j = coords[1];
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
@@ -528,6 +539,9 @@ canvas.onmouseup = (e) => {
         }
     }
     if (isDragging) {
+        // fix C: complete the drop and emit the move right here in the
+        // handler — never lost to the 10ms tick boundary again.
+        if (can_move && is_holding_piece) completeDrag(ux, uy);
         clearSelection();
     }
     lastMouseDownPx = null;
@@ -541,6 +555,11 @@ canvas.ontouchstart = (e) => {
     mouse_y = touch.clientY - rect.top;
     lastMouseDownPx = {x: mouse_x, y: mouse_y};
     isDragging = false;
+    dragSettled = false;
+    // fix C: same event-driven grab as mousedown
+    if (can_move && !is_being_validated && !is_holding_piece) {
+        grabDragPiece(mouse_x, mouse_y);
+    }
 };
 canvas.ontouchend = (e) => {
     is_mouse_down = false;
@@ -556,6 +575,8 @@ canvas.ontouchend = (e) => {
         }
     }
     if (isDragging) {
+        // fix C: same event-driven drop + emit as mouseup
+        if (can_move && is_holding_piece) completeDrag(mouse_x, mouse_y);
         clearSelection();
     }
     lastMouseDownPx = null;
