@@ -12,3 +12,6 @@ errors.md
 *.bak
 Dockerfile
 docker-compose.yml
+test-data-*/
+e2e-*-evidence.json
+*.log
