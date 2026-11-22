@@ -494,6 +494,15 @@ window.onload = () => {
     if (!saved) {
         draw();
         fen_to_board(start_fen);
+        // Bug A: if startGame arrived BEFORE onload, startGame already rotated
+        // the board for black — and fen_to_board() just overwrote it with the
+        // server-orientation start position, leaving black unrotated (wrong
+        // opening-move highlights until the first 'validated'). Invariant now
+        // enforced regardless of event order: whenever my_color is known, the
+        // visual board equals rotateBoard(serverBoard, my_color).
+        if (my_color != 0) {
+            board = window.ChessLayout.rotateBoard(board, my_color);
+        }
         render_board();
     }
 }
