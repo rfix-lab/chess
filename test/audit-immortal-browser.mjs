@@ -104,7 +104,7 @@ async function main() {
   }
   // A enters the lobby first (waits as white), then B (pairs, game starts)
   for (const P of [A, B]) {
-    await P.page.click('#play-button');
+    await P.page.evaluate(() => play()); // same handler as the button (robust vs overlays)
     await P.page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
     await P.page.waitForFunction(() => window.__chessDebug && window.socket, { timeout: 8000 });
     // hook elo events early (fired only for registered players)
