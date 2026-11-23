@@ -38,6 +38,12 @@ No branches, no push.
       RAW socket.io private-match from the harness + both pages /game?matchId=<id>;
       all 46 rows kept green
 - [x] S10 gates: node --check on every touched js + E2E gate 46/46 (x4, clean ports)
+- [x] S11 ADDENDUM (contract 32, committed 12:25): lobby restore-on-load —
+      fetch('/api/me') (S-A route, committed 275aa26): 200 {username, elo} ->
+      logged-in state (form hidden, "Вы вошли как <name>", Кабинет/Выход visible);
+      401 -> form as today; Выход clears the sessionID cookie and reloads
+- [x] S12 ADDENDUM: E2E row — signup user via raw socket -> fresh lobby load with
+      the cookie -> logged-in state restored; gates re-run
 
 ## UI commit 3c9869d
 `feat(client): lobby big-button stack + invites + game link/invite + account page (contract 32)`
@@ -105,6 +111,22 @@ and log an H-stale diagnostic row if the from-square is blank after that wait.
 275aa26 captured my raw-socket seating edits since we share the worktree, which is
 why I also commit 4911162 for that same change so my scope is self-documenting.)
 
+
+## ADDENDUM (contract 32, committed 12:25) — lobby loses login on F5
+S-A added `GET /api/me` (committed 275aa26): sessionID cookie -> validateSession ->
+200 {username, elo} | 401 {}. S-B (this commit): on lobby page load the JS now
+fetches `/api/me` (credentials same-origin); on 200 it renders the logged-in state
+EXACTLY as after a signin — form hidden, "Вы вошли как <username>", Кабинет/Выход
+visible, invites requested; on 401 (or network error) the form stays, as today.
+`Выход` (doLogout) now clears the sessionID cookie and RELOADS (the addendum
+requires the reload, since the page otherwise keeps the state it already rendered).
+E2E: new row A1 — sign up a user via a RAW socket (signup -> signin -> sessionID),
+open a FRESH lobby page with that cookie set, and assert the logged-in state renders
+WITHOUT any form submission (form hidden, auth-success shows the username, Кабинет
+visible) — i.e. exactly what an F5 of a signed-in lobby does now.
+Gates after the addendum: node --check clean; E2E 47/47 on ports 6345/6347/6349
+(A1 PASS on all three; all 46 prior rows still green).
+
 ## Could NOT be fully verified (need the server side)
 - Invite flow END-TO-END in a real browser: "Пригласить игрока" -> invite:created
   navigate + invite:failed Russian reasons, and the lobby "Приглашения" section
@@ -117,8 +139,12 @@ why I also commit 4911162 for that same change so my scope is self-documenting.)
   markup matches the exact fields S-A's route passes; the live end-to-end (a
   finished game appearing in Кабинет) is covered by S-A's T31 /account rows
   (84/84 in their committed run) but I did not own those assertions.
+- The 401 (no cookie / expired) branch of the restore check is exercised implicitly
+  by the two guest game pages (no cookie -> form stays); a dedicated "expired
+  cookie -> form" row was not added (the A1 row covers the 200 restore path, which
+  is the reported bug).
 - npm test: 1 server-side row (B4 F5 reconnect) was failing during my window —
   expected transient, not attributable to the client.
 
 ## Final gate line
-E2E (hard gate): **46/46 rows PASS** (bash test/e2e-gate.sh, ports 6331/6333/6335/6337 all green).
+E2E (hard gate): **47/47 rows PASS** after the addendum (46 prior + A1 lobby restore-on-load); earlier 46/46 confirmed on ports 6331/6333/6335/6337.

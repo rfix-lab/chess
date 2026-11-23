@@ -157,6 +157,7 @@ let serverProc = null;
 let browser = null;
 const white = { __ctx: null, __consoleErrors: [] };
 const black = { __ctx: null, __consoleErrors: [] };
+const restore = { __ctx: null, __consoleErrors: [] };
 
 try {
   // ---------- server (async spawn, never spawnSync) ----------
@@ -602,11 +603,65 @@ try {
     }
   }
 
+  // ---------- ADDENDUM (contract 32): lobby restore-on-load ----------
+  // The lobby loses the login on F5 (the cookie survived, the UI didn't check it).
+  // Now the lobby fetches /api/me on load: 200 {username, elo} -> logged-in state.
+  // E2E: sign up a user through a RAW socket (signup -> signin -> sessionID), then
+  // open a FRESH lobby page carrying that cookie and assert the page renders the
+  // logged-in state WITHOUT a form submission (form hidden, auth-success shows the
+  // username, Кабинет visible) — i.e. exactly what an F5 of a signed-in lobby now does.
+  const mePage = await mkPage(restore, 'me');
+  let a1Ok = false;
+  let a1Detail = '';
+  try {
+    const r2 = io(BASE, { transports: ['websocket'] });
+    await new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error('raw socket: no connect (restore)')), 10000);
+      r2.on('connect', () => { clearTimeout(to); res(null); });
+      r2.on('connect_error', e => { clearTimeout(to); rej(e); });
+    });
+    const uname = 'restore_' + Math.random().toString(36).slice(2, 8);
+    const upass = 'restor-pass-1';
+    const sessionID = await new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error('restore: no session after signin')), 10000);
+      r2.on('signup', (valid) => {
+        if (valid !== 1) { clearTimeout(to); return reject(new Error('restore: signup invalid code ' + valid)); }
+        r2.emit('signin', { username: uname, password: upass });
+      });
+      r2.on('signin', (valid, sid) => {
+        if (valid && sid) { clearTimeout(to); resolve(sid); }
+      });
+      r2.emit('signup', { username: uname, password: upass });
+    });
+    r2.close();
+    // Fresh lobby load as that user: set the session cookie BEFORE navigating
+    // (the page's own restore logic reads /api/me with it).
+    await restore.__ctx.setCookie({ name: 'sessionID', value: sessionID, url: BASE });
+    await mePage.goto(BASE + '/index', { waitUntil: 'networkidle2' });
+    a1Ok = await waitFor(async () => {
+      return mePage.evaluate((u) => {
+        const form = document.getElementById('form');
+        const authed = document.getElementById('authed');
+        const ok = document.getElementById('auth-success');
+        if (!form || !authed || !ok) return false;
+        const formHidden = form.classList.contains('hide') && !form.classList.contains('show');
+        const authedShown = authed.classList.contains('show') && !authed.classList.contains('hide');
+        return formHidden && authedShown && ok.textContent.indexOf(u) !== -1;
+      }, uname);
+    }, 'lobby logged-in state after fresh load', 15000);
+    a1Detail = `user=${uname}; form hidden, Кабинет/Выход visible, success line shows the username`;
+  } catch (e) {
+    a1Ok = false;
+    a1Detail = 'restore flow error: ' + (e && e.message || e);
+  }
+  logRow('A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200)', a1Ok ? 'PASS' : 'FAIL', a1Detail);
+
   // ---------- console errors ----------
   const wErr = white.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
   const bErr = black.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
-  logRow('C-err no JS console/page errors on white or black page', wErr.length === 0 && bErr.length === 0 ? 'PASS' : 'FAIL',
-    `white errors=${JSON.stringify(wErr).slice(0, 300)}; black errors=${JSON.stringify(bErr).slice(0, 300)}`);
+  const mErr = restore.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
+  logRow('C-err no JS console/page errors on white or black page', wErr.length === 0 && bErr.length === 0 && mErr.length === 0 ? 'PASS' : 'FAIL',
+    `white errors=${JSON.stringify(wErr).slice(0, 200)}; black errors=${JSON.stringify(bErr).slice(0, 200)}; lobby(restore) errors=${JSON.stringify(mErr).slice(0, 200)}`);
 
   results.serverLog = serverLog().split('\n').filter(l => l.includes('move:'));
   results.rows = rows;
@@ -622,6 +677,7 @@ try {
   try { if (browser) await browser.close(); } catch {}
   try { if (white.__ctx) await white.__ctx.close(); } catch {}
   try { if (black.__ctx) await black.__ctx.close(); } catch {}
+  try { if (restore.__ctx) await restore.__ctx.close(); } catch {}
   try { if (serverProc && serverProc.exitCode === null) serverProc.kill('SIGTERM'); } catch {}
   await sleep(150);
   try {

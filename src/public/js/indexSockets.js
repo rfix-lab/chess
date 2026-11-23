@@ -61,21 +61,10 @@ function reflectAuthState() {
 
 function doLogout() {
   deleteCookie('sessionID');
-  reflectAuthState();
-  // invites are per-user — a guest has none; drop the section
-  const inv = document.getElementById('invites');
-  if (inv) {
-    inv.classList.remove('show');
-    inv.classList.add('hide');
-    const list = document.getElementById('invites-list');
-    if (list) list.textContent = '';
-  }
-  const success = document.getElementById('auth-success');
-  if (success) {
-    success.textContent = 'Вы вышли';
-    success.classList.remove('hide');
-    success.classList.add('show');
-  }
+  // Addendum (contract 32): the lobby restores login state from /api/me on page
+  // load, so clearing the cookie alone would be overwritten by the already-rendered
+  // state — reload to re-run the restore check (401 -> form).
+  window.location.reload();
 }
 
 // Big-button wiring (index.ejs).
@@ -84,9 +73,36 @@ function doLogout() {
   const register = document.getElementById('register-button');
   if (login) login.addEventListener('click', () => showAuthForm('login'));
   if (register) register.addEventListener('click', () => showAuthForm('signup'));
-  // A returning, still-authenticated user: reveal Кабинет at load time.
+  // A returning, still-authenticated user: reveal Кабинет at load time (cookie
+  // only — /api/me below is the authority on whether the session is still valid).
   reflectAuthState();
 })();
+
+// --- Addendum (contract 32): lobby restore-on-load (bug: F5 loses the login) ---
+// The cookie survives the reload (writeCookie day=1), but the lobby used to
+// render the logged-out form unconditionally. The server route GET /api/me (S-A)
+// validates the cookie: 200 {username, elo} -> render the logged-in state
+// exactly as after a signin; 401 -> the form, as today. Network failure is
+// non-fatal (falls through to the logged-out form).
+async function restoreSession() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const me = await res.json();
+    if (!me || !me.username) return;
+    const successDiv = document.getElementById('auth-success');
+    if (successDiv) {
+      successDiv.textContent = 'Вы вошли как ' + me.username;
+      successDiv.classList.remove('hide');
+      successDiv.classList.add('show');
+    }
+    hideAuthForm();
+    reflectAuthState();
+    // A valid session means the server recognizes us — request our live invites.
+    socket.emit('invites:list');
+  } catch (e) { /* non-fatal: stay logged out */ }
+}
+restoreSession();;
 
 socket.on('signin', (valid, sessionID) => {
   if (valid) {
