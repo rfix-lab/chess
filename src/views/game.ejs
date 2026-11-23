@@ -38,9 +38,13 @@
     <!-- Invite UI: visible to REGISTERED users only (sessionID cookie present).
          Hidden for guests by gameSockets.js before first paint. -->
     <button id="btn-invite" class="game-btn game-btn-secondary" style="display:none;">Пригласить игрока</button>
-    <!-- Method selector: only «Стандартная» for now (rapid/custom later). -->
-    <select id="method-select" disabled title="Метод">
-      <option value="standard">Стандартная</option>
+    <!-- Method selector (contract 36): ENABLED — Классика (standard) / Рапид
+         (rapid). The invite button sends the selected value. NOTE: rapid does
+         not change clocks yet — the game has no clock; the method is carried
+         end-to-end (invite -> match -> games.csv) for the future clock feature. -->
+    <select id="method-select" title="Метод">
+      <option value="standard">Классика</option>
+      <option value="rapid">Рапид</option>
     </select>
     <button id="btn-takeback" class="game-btn game-btn-info">Takeback</button>
     <button id="btn-offer-draw" class="game-btn game-btn-secondary">Offer Draw</button>

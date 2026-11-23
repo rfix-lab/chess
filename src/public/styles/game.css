@@ -319,8 +319,8 @@ canvas#cnv {
   border-color: #3a6fe0;
 }
 
-/* Method selector in the actions row (contract 32): disabled, single option
-   «Стандартная» — matches the .game-btn look. */
+/* Method selector in the actions row. Contract 36: ENABLED — Классика/Рапид
+   (the invite button sends the selected value). */
 #method-select {
   padding: 9px 12px;
   border: 1px solid var(--panel-border);
@@ -329,8 +329,12 @@ canvas#cnv {
   font-weight: 600;
   color: var(--text);
   background: var(--button-bg);
-  cursor: not-allowed;
-  opacity: 0.7;
+  cursor: pointer;
+}
+
+#method-select:focus {
+  outline: none;
+  border-color: #3a6fe0;
 }
 
 /* Game link modal body shows a long URL — allow wrapping, not monospace. */
