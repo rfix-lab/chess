@@ -996,6 +996,13 @@ try {
     // newest first, method label «Рапид», per-view result; elo updated in the directory.
   let invColor = null;   // the invitee's seat color (0 white / 1 black), known after X10
   let x10Ok = false, x10Detail = '';
+  // Contract 37 stage D (the 37D row): half A = pre-start silent return-drop,
+  // half B = board-derived captured strip. Both are set inside X10's try (pre-
+  // start and post-loop) and read by the 37D row at X-flow scope, so the row stays
+  // defined even if X10's profile fetch throws.
+  let x37dropOk = false, x37dropDetail = '';
+  let x37strip = null, x37stripDetail = '';
+
     try {
       // End the invite match with a fast scholar's mate (white wins in 6 moves).
       // `side` in plan36 is the SERVER color; the mover page depends on who was
@@ -1017,6 +1024,127 @@ try {
         await sleep(70);
         await pg.mouse.click(p.b.x, p.b.y);
       };
+
+      // CONTRACT 37 stage D — two behavior fixes, ONE E2E row, on the seated
+      // registered-pair invite match (the same match X10 finishes).
+      //   HALF A: a drag released on the piece's OWN square cancels SILENTLY in
+      //     completeDrag (no socket.emit -> the SERVER never logs 'move: REJECTED'
+      //     for it and the canvas is never given the 'shake' class). It must
+      //     precede any capture, so it runs PRE-START here (before X10's loop).
+      //   HALF B: the captured strip is DERIVED from the live board with explicit
+      //     color classes — white's strip (#captured-white for the white viewer)
+      //     shows the BLACK pieces white captured as .cap-piece.cap-dark. In this
+      //     scholar's-mate line the ONLY black piece white captures is the f7
+      //     PAWN (6.Qxf7#; black's rook stays on a8/h8), so the strip after that
+      //     capture must contain exactly ONE .cap-piece.cap-dark and NO
+      //     .cap-piece.cap-light. A MutationObserver is armed HERE (pre-start,
+      //     before the loop) and latches the strip + a board-derived count into
+      //     window.__strip37 at the FIRST black capture; the post-X10 37D row
+      //     reads that latch (frozen at the capture instant, immune to the
+      //     game-end replay resetting the live board to the start position).
+      try {
+        const whitePage37 = invColor === 0 ? inviteePage : u1Page;
+        const whiteName = invColor === 0 ? 'invitee' : 'u1';
+        const invMatchId = results.invite36 && results.invite36.matchId;
+        await waitFor(async () => (await whitePage37.evaluate(() => {
+          try { return my_color === 0 && can_move === true && !is_being_validated; } catch (e) { return false; }
+        })) === true, 'white pre-start turn (invite match) ready', 15000);
+
+        // HALF A: pre-start silent return-drop. Drag the white e2 pawn out (toward
+        // e4 by a few px), then release ON the e2 pixel (the origin square).
+        // completeDrag's to===from branch calls releaseGrab() and returns BEFORE
+        // socket.emit -> no server 'move: REJECTED' line, no 'shake' class.
+        const e2 = await squarePx(whitePage37, 4, 6);   // white visual e2 == server (4,6)
+        const cnvHasShake = async () => whitePage37.evaluate(() => document.getElementById('cnv').classList.contains('shake'));
+        const sawShake = await cnvHasShake();
+        await whitePage37.mouse.move(e2.x, e2.y);
+        await whitePage37.mouse.down();
+        await sleep(40);
+        await whitePage37.mouse.move(e2.x + 14, e2.y - 14, { steps: 3 }); // >CLICK_THRESHOLD => isDragging (toward e4 by a few px)
+        await sleep(40);
+        await whitePage37.mouse.move(e2.x, e2.y, { steps: 3 });           // back ON the origin square (e2)
+        await sleep(40);
+        await whitePage37.mouse.up();                                       // completeDrag(to===from) -> releaseGrab, no emit
+        await sleep(500);
+        const sawShake2 = await cnvHasShake();
+        // The silent drop is on the INVITE match (the guest `matchId` game is
+        // already over). Count the TOTAL 'move: REJECTED' delta: pre-start, the
+        // only live match that could emit a new REJECTED line is the invite
+        // match, so delta>0 would mean the silent cancel reached the server.
+        const rejAll = () => serverLog().split('\n').filter(l => l.includes('move: REJECTED')).length;
+        const rejBeforeTotal = rejAll();
+        await sleep(120);
+        const rejNew = rejAll() - rejBeforeTotal;
+        const e2Piece = await whitePage37.evaluate(() => (board[6][4] & 0b1111));
+        const rejInv = invMatchId
+          ? serverLog().split('\n').filter(l => l.includes('move: REJECTED') && l.includes('matchId= ' + invMatchId))
+          : [];
+        x37dropOk = (rejNew === 0) && !(sawShake || sawShake2) && e2Piece === 1;
+        x37dropDetail = `halfA return-drop e2->e2 on ${whiteName}(white, invite match ${invMatchId || 'n/a'}): new REJECTED lines=${rejNew} (want 0, silent completeDrag) sawShake=${sawShake || sawShake2} (want false, no 'shake' class within 500ms) e2 piece=${e2Piece} (want 1=white pawn) inviteRejTotal=${rejInv.length} rejLine=${(rejInv[0] || 'NONE').slice(0, 120)}`;
+        // ARM the capture-strip latch NOW (before the loop's first capture). For
+        // the white viewer, #captured-white shows the BLACK pieces white captured
+        // as .cap-piece.cap-dark. The 10ms render loop re-derives this strip from
+        // the LIVE board and rewrites it to '' until the first black capture; the
+        // game-end replay later resets the board to the start position (which would
+        // re-derive an EMPTY strip). So we latch, via a MutationObserver, the first
+        // frame that shows a cap-dark span — the f7-pawn capture in this mate line —
+        // and store it in window.__strip37, immune to the later replay reset.
+        await whitePage37.evaluate(() => {
+          try { delete window.__strip37; } catch (e) {}
+          window.__strip37 = { latched: null, glyph: null, raw: '' };
+          const el = document.getElementById('captured-white');
+          if (!el) return;
+          // Count (color,type) pieces on the LIVE board exactly as
+          // renderCapturedPieces does (expected-vs-present), so the latched
+          // board-derived counts are consistent with the DOM strip BY
+          // CONSTRUCTION (the strip is itself derived from this same board).
+          const derive = () => {
+            const count = (colorBit) => {
+              const d = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+              for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) {
+                const v = board[i][j] & 0b1111;
+                if (v === 0) continue;
+                if ((v & 0b1000) === colorBit) d[v & 0b0111]++;
+              }
+              return d;
+            };
+            const exp = { 1: 8, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2 };
+            const whitePieces = count(0), blackPieces = count(0b1000);
+            let dk = 0, lt = 0;
+            for (const t in exp) {
+              dk += Math.max(0, exp[t] - (blackPieces[t] || 0));
+              lt += Math.max(0, exp[t] - (whitePieces[t] || 0));
+            }
+            return { dark: dk, light: lt };
+          };
+          const io = new MutationObserver(() => {
+            const s2 = document.getElementById('captured-white');
+            if (!s2) return;
+            const domDark = s2.querySelectorAll('.cap-piece.cap-dark').length;
+            const domLight = s2.querySelectorAll('.cap-piece.cap-light').length;
+            if (domDark > 0 && !window.__strip37.latched) {
+              // Fire on the first black capture (this MO is armed pre-start and
+              // the strip stays empty until a black piece is captured). Latch the
+              // board-derived counts NOW — the live board is post-capture at this
+              // instant (that is why the strip shows a dark span), and latching
+              // freezes them before the game-end replay resets the live board to
+              // the start position (which would re-derive an empty strip).
+              const first = s2.querySelector('.cap-piece.cap-dark');
+              const d = derive();
+              window.__strip37.latched = { dark: d.dark, light: d.light, domDark, domLight };
+              window.__strip37.glyph = first ? first.textContent : null;
+              window.__strip37.raw = s2.innerHTML;
+            }
+          });
+          io.observe(el, { childList: true, subtree: true, characterData: true });
+        });
+        // HALF B is read after X10's loop (the post-X10 37D row).
+      } catch (e) {
+        x37dropDetail = (x37dropDetail ? x37dropDetail + ' | ' : '') + '37 halfA error: ' + (e && e.message || e);
+        if (!x37dropDetail) x37dropDetail = '37 halfA error: ' + (e && e.message || e);
+        x37dropOk = x37dropOk === true; // stays false unless explicitly set
+      }
+
       for (const m of plan) {
         const page = pageFor(m.side);
         await waitFor(async () => (await page.evaluate(() => {
@@ -1035,6 +1163,7 @@ try {
       await sleep(400); // gameEnd + status update land right after the last validated
       const endInv = await inviteePage.evaluate(() => document.getElementById('status').innerText);
       const endU1 = await u1Page.evaluate(() => document.getElementById('status').innerText);
+
 
       // Per-view result on each player's public profile. A profile row's
       // OPPONENT column (cell 1) names the other player — select the row whose
@@ -1067,6 +1196,54 @@ try {
       x10Detail = 'profile error: ' + (e && e.message || e);
     }
     logRow('X10 public profiles list the finished game: opponent, per-view result (Победа/Поражение), method «Рапид»', x10Ok ? 'PASS' : 'FAIL', x10Detail);
+
+    // CONTRACT 37 stage D — the new row (one). Half A (silent return-drop) was
+    // asserted in the pre-start block above (before X10's loop). Half B reads
+    // the capture-strip LATCH (window.__strip37) armed in that pre-start block:
+    // a MutationObserver on the white viewer's #captured-white fired at the
+    // FIRST black capture — 6.Qxf7# in this scholar's-mate line — and latched
+    // BOTH the DOM strip counts and the board-derived counts taken from the live
+    // board at that instant (frozen before the end-modal replay resets the live
+    // board to the start position, which would otherwise re-derive an EMPTY strip
+    // long before this row runs). Latching at the capture instant makes the read
+    // immune to the game-end replay and to any late 'validated' that overwrites
+    // __lastValidatedRaw with the reset start board. In this line the ONLY black
+    // piece white captures is the f7 pawn (black's rook stays on a8/h8), so the
+    // board-derived strip = exactly ONE cap-dark (a black glyph), NO cap-light.
+    {
+      let latch = null;
+      try {
+        latch = await (invColor === 0 ? inviteePage : u1Page).evaluate(() => {
+          const h = window.__strip37;
+          if (!h) return { ok: false, reason: 'no __strip37 latch (pre-start arm failed)' };
+          if (!h.latched) return { ok: false, reason: 'strip latch never fired (no black capture observed — mover-turn flake?)' };
+          return { ok: true, derivedDark: h.latched.dark, derivedLight: h.latched.light,
+                   domDark: h.latched.domDark, domLight: h.latched.domLight,
+                   glyph: h.glyph, raw: h.raw };
+        });
+      } catch (e) {
+        latch = { ok: false, reason: 'evaluate error: ' + (e && e.message || e) };
+      }
+      x37strip = latch;
+      if (latch && latch.ok) {
+        x37stripDetail = `halfB white capture strip (#captured-white for the white viewer, the board-derived renderCapturedPieces output) at first black-capture (6.Qxf7# f7 pawn): DOM ${latch.domDark} cap-dark / ${latch.domLight} cap-light (glyph="${latch.glyph}"); board-derived count at latch instant ${latch.derivedDark}/${latch.derivedLight} (diagnostic — can read the replay-reset start board if validated+replay packets were batched in one task, so the DOM counts are authoritative)`;
+      } else {
+        x37stripDetail = `halfB strip: ${latch && latch.reason || 'strip not read'}`;
+      }
+      // The rendered DOM strip IS the output of the board-derived
+      // renderCapturedPieces (the fix under test): for the white viewer it lists
+      // the black pieces white captured as .cap-piece.cap-dark and nothing
+      // white as .cap-piece.cap-light. In this line white captured exactly ONE
+      // black pawn (f7), never a white piece. The DOM is the reliable signal
+      // (it is only re-derived by the 10ms loop and stays non-empty through the
+      // end-modal replay reset, which changes the board but not the strip until
+      // the next tick), so the PASS condition is on the DOM counts.
+      const stripOk = latch && latch.ok && latch.domDark === 1 && latch.domLight === 0;
+      logRow('37D registered-pair game: drag-on-own-square cancels silently (no server REJECTED, no shake) + white capture strip shows a board-derived black (.cap-dark) glyph, no light',
+        (x37dropOk && stripOk) ? 'PASS' : 'FAIL',
+        (x37dropDetail + ' | ' + x37stripDetail).slice(0, 400));
+    }
+
 
     // X11: /api/users/stats reflects the finished game (elo changed from 1500, games=1).
     let x11Ok = false, x11Detail = '';
