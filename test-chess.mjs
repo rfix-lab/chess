@@ -965,7 +965,7 @@ async function test() {
         typeof u1Rated.opponent === 'number' && u2Rated && u2Rated !== u1Rated && u2Rated.rated === true &&
         u1Rated.opponent === u2Rated.own && u2Rated.opponent === u1Rated.own)
       pass('T30 seat-elo: registered vs registered -> both rated: true, opponent=<other elo> (reciprocal)');
-    else fail('T30 seat-elo: registered-vs-registered reciprocal', `u1=${JSON.stringify(u1Rated)} u2=${JSON.stringify(u2Rated)}`);
+    else fail('T30 seat-elo: registered-vs-registered reciprocal', `u1All=${JSON.stringify(u1Elos)} u1rated=${JSON.stringify(u1Rated)} u2=${JSON.stringify(u2Rated)}`);
 
     // Shape discipline: seat payloads must NOT carry the game-end keys (the
     // client disambiguates the two 'elo' payload shapes by keys).
