@@ -2,6 +2,15 @@
 // click-to-move + drag on the canvas), two guest players, one private match,
 // server DEBUG=1.
 //
+// SEATING (contract 32): the LOBBY no longer creates the private match (that
+// moved to the GAME page). The harness now opens a RAW socket.io client to the
+// server, emits 'private-match', and reads the echoed matchId from the
+// 'private-match' event (server event unchanged: the generator socket receives
+// the id). It then disconnects that raw socket (its disconnect would otherwise
+// end the pre-start match) and navigates BOTH guest pages to /game?matchId=<id>
+// — the white page joins as white (host branch), the black page as black, and
+// startGame fires on both.
+//
 // Requires (system deps — see the "test:e2e" script in package.json):
 //   - a Chromium binary at /snap/bin/chromium
 //   - a GLOBAL puppeteer-core install (resolved from
@@ -52,6 +61,12 @@ const require = createRequire(import.meta.createRequire ? undefined : import.met
 const PUPPETEER_ROOT = process.env.E2E_PUPPETEER_ROOT
   || '/root/.nvm/versions/node/v24.22.1/lib/node_modules';
 const puppeteer = require(path.join(PUPPETEER_ROOT, 'puppeteer-core'));
+// socket.io-client for the RAW harness socket (seating). Lives in the project's
+// node_modules (a devDependency), so resolve it relative to the harness like the
+// other require() calls — NOT the global puppeteer root. The UMD export is a
+// function that is also its own namespace (io.default is undefined), so
+// io(url, opts) is the constructor.
+const io = require('socket.io-client');
 
 const PORT = Number(process.env.E2E_PORT || 6321);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -182,21 +197,34 @@ try {
     return page;
   };
 
-  // ----- SEATING (same flow as the A2 audit): white's context creates the
-  // match AND navigates its own socket to /game (white seat); black uses a
-  // separate context and takes the black seat. startGame fires once both seats
-  // are filled. -----
-  const lobby = await mkPage(white, 'lobby');
-  await lobby.goto(BASE + '/index', { waitUntil: 'networkidle2' });
-  await waitFor(async () => (await lobby.$('#play-button')) !== null, 'lobby loaded');
-  await lobby.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} });
-  await lobby.evaluate(() => window.genLink());
-  await waitFor(async () => (await lobby.evaluate(() => window.__privateMatchId)) != null, 'private-match matchId');
-  results.matchId = await lobby.evaluate(() => window.__privateMatchId);
+  // ----- SEATING (contract 32): the lobby no longer creates the private match. -----
+  // The harness opens a RAW socket.io client to the server, emits 'private-match',
+  // and reads the echoed id back from the 'private-match' event (server event is
+  // unchanged: the generator socket receives the id). We then disconnect that raw
+  // socket (its disconnect would otherwise end the pre-start match, since a match
+  // whose host seat is empty + one player disconnects ends immediately) and point
+  // BOTH guest pages at /game?matchId=<id>.
+  const rawIo = await new Promise((resolve, reject) => {
+    const r = io(BASE, { transports: ['websocket'] });
+    const to = setTimeout(() => reject(new Error('raw socket: no connect')), 10000);
+    r.on('connect', () => { clearTimeout(to); resolve(r); });
+    r.on('connect_error', e => { clearTimeout(to); reject(e); });
+  });
+  results.matchId = await new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('raw socket: no private-match echo')), 10000);
+    rawIo.on('private-match', id => { clearTimeout(to); resolve(id); });
+    rawIo.emit('private-match', 1);
+  });
   const matchId = results.matchId;
-  console.log('white player created private match, matchId =', matchId);
+  console.log('harness RAW socket created private match, matchId =', matchId);
+  // Drop the raw socket now: its disconnect must NOT end the not-yet-seated match.
+  rawIo.close();
+  await sleep(150);
 
-  await lobby.goto(BASE + `/game?matchId=${matchId}`, { waitUntil: 'networkidle2' });
+  // White page joins first (host branch -> player1Socket); black page second
+  // (player1Socket connected -> player2Socket; startMatch fires).
+  const whitePage = await mkPage(white, 'white');
+  await whitePage.goto(BASE + `/game?matchId=${matchId}`, { waitUntil: 'networkidle2' });
   await sleep(800);
 
   const blackPage = await mkPage(black, 'black');
@@ -494,7 +522,6 @@ try {
     const svFrom = toXY(m.w), svTo = toXY(m.b); // server coords
     const vFrom = (m.side === 0) ? svFrom : rot(svFrom.x, svFrom.y);
     const vTo = (m.side === 0) ? svTo : rot(svTo.x, svTo.y);
-
     if (m.o0) {
       // 4. O-O: the king selection must highlight the castling target square
       // (g1, visual == server for white), then click it. Closes the A2

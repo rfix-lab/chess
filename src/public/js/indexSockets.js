@@ -196,19 +196,9 @@ socket.on('signup', valid => {
   });
 })();
 
-// Contract 32: private-link generation moved to the GAME page ("Ссылка на игру").
-// The lobby keeps this listener ONLY to record the echoed id (window.__privateMatchId)
-// for backward-compat / the test harness; the generated-link block is gone from the
-// DOM, so the optional link update is guarded.
-socket.on('private-match', matchId => {
-  window.__privateMatchId = matchId;
-  const linkDiv = document.getElementById('generated-link');
-  if (!linkDiv) return;
-  linkDiv.textContent = window.location.origin + '/game?matchId=' + matchId;
-  linkDiv.href = window.location.origin + '/game?matchId=' + matchId;
-  linkDiv.classList.remove('hide');
-  linkDiv.classList.add('show');
-});
+// Contract 32: private-link generation MOVED to the GAME page ("Ссылка на игру").
+// The lobby no longer listens for 'private-match' at all (its own socket never
+// requests one now, and the E2E harness creates the match via its OWN raw socket).
 
 // --- Invites (contract 32 §3) ---
 // Server payload: [{from, fromElo, method, matchId, createdAt}] — stored
