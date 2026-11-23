@@ -766,10 +766,28 @@ function showGameLink(id) {
   gameLinkModal.style.display = 'flex';
 }
 
+// Contract 36 §1: landing on /game?matchId=<id>#link (the lobby [Играть] flow)
+// auto-opens the link modal ONCE — after seating, so the modal sits on top of
+// the live board. Cleared from the URL so a reload does not re-open it.
+let __linkModalPending = (location.hash || '') === '#link';
+if (__linkModalPending) {
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
 // The server echoes the generated id back on the SAME socket that requested it.
 socket.on('private-match', matchId => {
   showGameLink(matchId);
 });
+
+// Both seating paths (first-time 'startGame' and reload 'reconnected') open the
+// pending link modal exactly once — the page's own "I am seated" signals.
+function openLinkModalIfPending() {
+  if (!__linkModalPending) return;
+  __linkModalPending = false;
+  if (matchId) showGameLink(matchId);
+}
+socket.on('startGame', () => openLinkModalIfPending());
+socket.on('reconnected', () => openLinkModalIfPending());
 
 if (btnGameLink) {
   btnGameLink.addEventListener('click', () => {
@@ -814,15 +832,25 @@ const INVITE_FAIL_TEXT = {
   'auth': 'Приглашение — только для зарегистрированных',
   'no-user': 'Нет такого пользователя',
   'self': 'Нельзя пригласить самого себя',
-  'method-na': 'Пока доступен только метод «стандартная»',
+  'method-na': 'Неизвестный метод — выберите «Классика» или «Рапид»',
 };
+
+// Contract 36 §3: the method select is ENABLED (standard/rapid); the invite
+// carries the selected value. The server is authoritative (it rejects anything
+// that is not 'standard'|'rapid' with method-na).
+function selectedMethod() {
+  const sel = document.getElementById('method-select');
+  if (!sel) return 'standard';
+  const v = sel.value;
+  return (v === 'rapid') ? 'rapid' : 'standard';
+}
 
 if (btnInvite) {
   btnInvite.addEventListener('click', () => {
     if (gameIsOver) return;
     const target = (prompt('Имя пользователя для приглашения:') || '').trim();
     if (!target) return;
-    socket.emit('invite:create', { targetUsername: target, method: 'standard' });
+    socket.emit('invite:create', { targetUsername: target, method: selectedMethod() });
   });
 }
 

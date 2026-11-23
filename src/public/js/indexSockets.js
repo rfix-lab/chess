@@ -42,9 +42,25 @@ function submitAuth() {
 // --- Session state helpers ---
 // Login state is read from the sessionID cookie (same check the GAME page uses
 // to hide invite UI from guests). A fresh load with a valid cookie shows the
-// authenticated controls immediately.
+// authenticated controls immediately. /api/me below is the authority: it can
+// 200 (keep logged-in) or 401 (fall back to the logged-out form).
 function isLoggedIn() {
   return readCookie('sessionID') != null;
+}
+
+// Contract 36: the username we are logged in as (null for guests). Used to mark
+// the own row on the /users page and kept here so reflectAuthState stays the
+// single source of truth for the lobby's auth-dependent UI.
+let meUsername = null;
+
+// Contract 36 §1: [Вход]/[Регистрация] are HIDDEN while logged in and restored
+// on logout. The stack order in index.ejs is [Играть], [Пользователи], [Вход],
+// [Регистрация] — hiding the bottom two leaves the stack intact.
+function setAuthButtonsVisible(visible) {
+  for (const id of ['login-button', 'register-button']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hide', !visible);
+  }
 }
 
 function reflectAuthState() {
@@ -53,14 +69,18 @@ function reflectAuthState() {
   if (isLoggedIn()) {
     authed.classList.remove('hide');
     authed.classList.add('show');
+    setAuthButtonsVisible(false);
   } else {
     authed.classList.remove('show');
     authed.classList.add('hide');
+    setAuthButtonsVisible(true);
   }
 }
 
 function doLogout() {
   deleteCookie('sessionID');
+  meUsername = null;
+  hideAuthForm();
   // Addendum (contract 32): the lobby restores login state from /api/me on page
   // load, so clearing the cookie alone would be overwritten by the already-rendered
   // state — reload to re-run the restore check (401 -> form).
@@ -71,12 +91,16 @@ function doLogout() {
 (function wireBigButtons() {
   const login = document.getElementById('login-button');
   const register = document.getElementById('register-button');
+  const usersBtn = document.getElementById('users-button');
   if (login) login.addEventListener('click', () => showAuthForm('login'));
   if (register) register.addEventListener('click', () => showAuthForm('signup'));
-  // A returning, still-authenticated user: reveal Кабинет at load time (cookie
-  // only — /api/me below is the authority on whether the session is still valid).
+  // Contract 36 §1: [Пользователи] -> the /users directory page.
+  if (usersBtn) usersBtn.addEventListener('click', () => { window.location.href = '/users'; });
+  // A returning, still-authenticated user: reveal Кабинет + hide [Вход]/
+  // [Регистрация] at load time (cookie only — /api/me below is the authority on
+  // whether the session is still valid and corrects this if the cookie is stale).
   reflectAuthState();
-})();
+})();;
 
 // --- Addendum (contract 32): lobby restore-on-load (bug: F5 loses the login) ---
 // The cookie survives the reload (writeCookie day=1), but the lobby used to
@@ -90,6 +114,7 @@ async function restoreSession() {
     if (!res.ok) return;
     const me = await res.json();
     if (!me || !me.username) return;
+    meUsername = me.username;
     const successDiv = document.getElementById('auth-success');
     if (successDiv) {
       successDiv.textContent = 'Вы вошли как ' + me.username;
@@ -119,6 +144,7 @@ socket.on('signin', (valid, sessionID) => {
     [usrnDiv, psdDiv, invDiv].forEach(d => { if (d) d.classList.remove('show'); });
 
     if (usernameInput && usernameInput.value) {
+      meUsername = usernameInput.value;
       successDiv.textContent = 'Вы вошли как ' + usernameInput.value;
     }
     successDiv.classList.remove('hide');
@@ -243,7 +269,9 @@ function renderInvites(payload) {
 
     const label = document.createElement('span');
     label.className = 'invite-label';
-    const methodText = (inv.method && inv.method !== 'standard') ? inv.method : 'стандартная';
+    // Contract 36 §2: the server now sends the REAL method ('standard'|'rapid');
+    // the user-visible text is the Russian label (matches the picker: Классика/Рапид).
+    const methodText = inv.method === 'rapid' ? 'Рапид' : 'Классика';
     label.textContent = inv.from + (inv.fromElo != null ? ` (Elo ${inv.fromElo})` : '') +
       ' — метод: ' + methodText;
     row.appendChild(label);

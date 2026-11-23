@@ -20,10 +20,13 @@
   </header>
 
   <!-- Big action stack (contract 32): [Вход]/[Играть] >= 56px, [Регистрация] ~40px.
-       Private-link generation is GONE from the lobby — the GAME page owns it now. -->
+       Contract 36: [Пользователи] added to the stack -> /users directory.
+       [Вход]/[Регистрация] are HIDDEN while logged in (indexSockets.js reflects
+       the /api/me state on load and on signin/logout). -->
   <div id="action-stack" class="action-stack">
-    <button id="login-button" class="big-btn">Вход</button>
     <button id="play-button" class="big-btn">Играть</button>
+    <button id="users-button" class="big-btn">Пользователи</button>
+    <button id="login-button" class="big-btn">Вход</button>
     <button id="register-button" class="mid-btn">Регистрация</button>
   </div>
 
@@ -68,8 +71,8 @@
   </div>
 
   <script src="js/cookieUtil.js"></script>
-  <script src="js/index.js"></script>
   <script src="js/indexSockets.js"></script>
+  <script src="js/index.js"></script>
 </body>
 
 </html>
