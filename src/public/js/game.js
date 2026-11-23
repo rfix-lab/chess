@@ -200,7 +200,7 @@ function drawPieceGlyph(glyph, isWhite, gx, gy) {
     } else {
         ctx.fillStyle = '#141a26';
         ctx.fillText(glyph, gx, gy);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
     }
     ctx.strokeText(glyph, gx, gy);
 }
