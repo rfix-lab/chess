@@ -1,16 +1,16 @@
 {
   "env": {
-    "port": 7913,
+    "port": 18965,
     "chromium": "/snap/bin/chromium",
     "serverLog": "/tmp/e2e-client-server.log",
-    "time": "2026-11-23T15:07:46.810Z"
+    "time": "2026-11-23T18:25:41.262Z"
   },
-  "matchId": "y3oayyix",
+  "matchId": "zg124cl5",
   "rows": [
     {
       "test": "S0 both guests seated in one private match; startGame(0/1) delivered",
       "status": "PASS",
-      "detail": "white=\"Playing as white\", black=\"Playing as black\" (matchId y3oayyix; created by harness raw socket.io private-match — contract 32)"
+      "detail": "white=\"Playing as white\", black=\"Playing as black\" (matchId zg124cl5; created by harness raw socket.io private-match — contract 32)"
     },
     {
       "test": "S1 initial boards: normalised==start both pages; black raw==rotateBoard(start) — bug A regression",
@@ -30,7 +30,7 @@
     {
       "test": "H3 selection highlight pixels land on e3, NOT on the transposed mirror d4",
       "status": "PASS",
-      "detail": "e3 [181,136,99]->[161,169,93] tinted=true; d4 [181,136,99]->[181,136,99] clean=true"
+      "detail": "e3 [85,100,138]->[94,143,120] tinted=true; d4 [85,100,138]->[85,100,138] clean=true"
     },
     {
       "test": "H4 drag own piece to illegal square (e2->e5 drag) -> rejected, piece stays on e2, board intact",
@@ -40,7 +40,7 @@
     {
       "test": "E-ill illegal move e2->e5 (raw socket emit) -> server REJECTED + canvas shake, board unchanged",
       "status": "PASS",
-      "detail": "applied 0->0 shake=true boardUnchanged=true serverRejLine=[DEBUG] 2026-11-23T15:07:56.110Z move: REJECTED reason=illegal matchId= y3oayyix turnState= 0 mover-is-p1= true from= 6:"
+      "detail": "applied 0->0 shake=true boardUnchanged=true serverRejLine=[DEBUG] 2026-11-23T18:25:48.600Z move: REJECTED reason=illegal matchId= zg124cl5 turnState= 0 mover-is-p1= true from= 6:"
     },
     {
       "test": "Hm1-white highlights on select(4,6) == genLegalMoves (in-page)",
@@ -50,7 +50,7 @@
     {
       "test": "M1 e2->e4 (white, drag) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=1 (expected >= 1); last: [DEBUG] 2026-11-23T15:07:57.082Z move: APPLIED matchId= y3oayyix turn= 0 from= 6:4 to= 4:4"
+      "detail": "appliedLines=1 (expected >= 1); last: [DEBUG] 2026-11-23T18:25:49.555Z move: APPLIED matchId= zg124cl5 turn= 0 from= 6:4 to= 4:4"
     },
     {
       "test": "S1 board SYNC after move (both pages == expected server board e2->e4)",
@@ -70,7 +70,7 @@
     {
       "test": "M2 e7->e5 (black, drag) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=2 (expected >= 2); last: [DEBUG] 2026-11-23T15:07:57.706Z move: APPLIED matchId= y3oayyix turn= 1 from= 1:4 to= 3:4"
+      "detail": "appliedLines=2 (expected >= 2); last: [DEBUG] 2026-11-23T18:25:50.107Z move: APPLIED matchId= zg124cl5 turn= 1 from= 1:4 to= 3:4"
     },
     {
       "test": "S2 board SYNC after move (both pages == expected server board e7->e5)",
@@ -90,7 +90,7 @@
     {
       "test": "M3 g1->h3 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=3 (expected >= 3); last: [DEBUG] 2026-11-23T15:07:58.042Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:6 to= 5:7"
+      "detail": "appliedLines=3 (expected >= 3); last: [DEBUG] 2026-11-23T18:25:50.427Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:6 to= 5:7"
     },
     {
       "test": "S3 board SYNC after move (both pages == expected server board g1->h3)",
@@ -105,7 +105,7 @@
     {
       "test": "M4 b8->c6 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=4 (expected >= 4); last: [DEBUG] 2026-11-23T15:07:58.381Z move: APPLIED matchId= y3oayyix turn= 1 from= 0:1 to= 2:2"
+      "detail": "appliedLines=4 (expected >= 4); last: [DEBUG] 2026-11-23T18:25:50.756Z move: APPLIED matchId= zg124cl5 turn= 1 from= 0:1 to= 2:2"
     },
     {
       "test": "S4 board SYNC after move (both pages == expected server board b8->c6)",
@@ -120,7 +120,7 @@
     {
       "test": "M5 f1->c4 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=5 (expected >= 5); last: [DEBUG] 2026-11-23T15:07:58.697Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:5 to= 4:2"
+      "detail": "appliedLines=5 (expected >= 5); last: [DEBUG] 2026-11-23T18:25:51.078Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:5 to= 4:2"
     },
     {
       "test": "S5 board SYNC after move (both pages == expected server board f1->c4)",
@@ -135,7 +135,7 @@
     {
       "test": "M6 f8->e7 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=6 (expected >= 6); last: [DEBUG] 2026-11-23T15:07:59.119Z move: APPLIED matchId= y3oayyix turn= 1 from= 0:5 to= 1:4"
+      "detail": "appliedLines=6 (expected >= 6); last: [DEBUG] 2026-11-23T18:25:51.409Z move: APPLIED matchId= zg124cl5 turn= 1 from= 0:5 to= 1:4"
     },
     {
       "test": "S6 board SYNC after move (both pages == expected server board f8->e7)",
@@ -155,7 +155,7 @@
     {
       "test": "M7 e1(O-O)->g1 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=7 (expected >= 7); last: [DEBUG] 2026-11-23T15:07:59.439Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:4 to= 7:6"
+      "detail": "appliedLines=7 (expected >= 7); last: [DEBUG] 2026-11-23T18:25:51.743Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:4 to= 7:6"
     },
     {
       "test": "S7 board SYNC after move (both pages == expected server board e1(O-O)->g1)",
@@ -170,7 +170,7 @@
     {
       "test": "M8 g8->f6 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=8 (expected >= 8); last: [DEBUG] 2026-11-23T15:07:59.758Z move: APPLIED matchId= y3oayyix turn= 1 from= 0:6 to= 2:5"
+      "detail": "appliedLines=8 (expected >= 8); last: [DEBUG] 2026-11-23T18:25:52.102Z move: APPLIED matchId= zg124cl5 turn= 1 from= 0:6 to= 2:5"
     },
     {
       "test": "S8 board SYNC after move (both pages == expected server board g8->f6)",
@@ -185,7 +185,7 @@
     {
       "test": "M9 d1->h5 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=9 (expected >= 9); last: [DEBUG] 2026-11-23T15:08:00.093Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:3 to= 3:7"
+      "detail": "appliedLines=9 (expected >= 9); last: [DEBUG] 2026-11-23T18:25:52.421Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:3 to= 3:7"
     },
     {
       "test": "S9 board SYNC after move (both pages == expected server board d1->h5)",
@@ -200,7 +200,7 @@
     {
       "test": "M10 a7->a6 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=10 (expected >= 10); last: [DEBUG] 2026-11-23T15:08:00.443Z move: APPLIED matchId= y3oayyix turn= 1 from= 1:0 to= 2:0"
+      "detail": "appliedLines=10 (expected >= 10); last: [DEBUG] 2026-11-23T18:25:52.710Z move: APPLIED matchId= zg124cl5 turn= 1 from= 1:0 to= 2:0"
     },
     {
       "test": "S10 board SYNC after move (both pages == expected server board a7->a6)",
@@ -215,7 +215,7 @@
     {
       "test": "M11 h5->f7 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=11 (expected >= 11); last: [DEBUG] 2026-11-23T15:08:00.806Z move: APPLIED matchId= y3oayyix turn= 0 from= 3:7 to= 1:5"
+      "detail": "appliedLines=11 (expected >= 11); last: [DEBUG] 2026-11-23T18:25:53.010Z move: APPLIED matchId= zg124cl5 turn= 0 from= 3:7 to= 1:5"
     },
     {
       "test": "S11 board SYNC after move (both pages == expected server board h5->f7)",
@@ -235,42 +235,42 @@
     {
       "test": "A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200)",
       "status": "PASS",
-      "detail": "user=restore_flk680; form hidden, [Вход]/[Регистрация] hidden (contract 36), Кабинет/Выход visible, success line shows the username"
+      "detail": "user=restore_blt84o; form hidden, [Вход]/[Регистрация] hidden (contract 36), Кабинет/Выход visible, success line shows the username"
     },
     {
       "test": "X1 contract 36: two users registered (inviter + invitee) for the users-directory flow",
       "status": "PASS",
-      "detail": "u1=u1_nrxt0a, invitee=invitee_nrxt0a, u3=u3_nrxt0a (all registered, Elo 1500, 0 games)"
+      "detail": "u1=u1_45j5wk, invitee=invitee_45j5wk, u3=u3_45j5wk (all registered, Elo 1500, 0 games)"
     },
     {
       "test": "X2 /users public directory: guest sees the table; /api/users/stats lists all three users (elo 1500, 0 games) in elo-desc/name-asc order",
       "status": "PASS",
-      "detail": "GET /api/users/stats (no auth) status=200: users with elo 1500 / 0 games incl. all three fresh users: true; count=4; page row order [\"invitee_nrxt0a\",\"restore_flk680\",\"u1_nrxt0a\",\"u3_nrxt0a\"] (want invitee<u1<u3): true"
+      "detail": "GET /api/users/stats (no auth) status=200: users with elo 1500 / 0 games incl. all three fresh users: true; count=4; page row order [\"invitee_45j5wk\",\"restore_blt84o\",\"u1_45j5wk\",\"u3_45j5wk\"] (want invitee<u1<u3): true"
     },
     {
       "test": "X3 /users lists the invitee with Elo 1500 and 0 games (row not marked self for the inviter)",
       "status": "PASS",
-      "detail": "invitee row present post-goto (found=true); cells=[\"invitee_nrxt0a\",\"1500\",\"0\"], self=false (want name/1500/0, self=false)"
+      "detail": "invitee row present post-goto (found=true); cells=[\"invitee_45j5wk\",\"1500\",\"0\"], self=false (want name/1500/0, self=false)"
     },
     {
       "test": "X4 right-click on a users row opens the invite menu with method choice (Классика / Рапид)",
       "status": "PASS",
-      "detail": "menu head=\"Пригласить invitee_nrxt0a:\" items=[\"Пригласить\",\"Классика\",\"Рапид\"]"
+      "detail": "menu head=\"Пригласить invitee_45j5wk:\" items=[\"Пригласить\",\"Классика\",\"Рапид\"]"
     },
     {
       "test": "X5 users-page invite: «Рапид» chosen -> invite:create {method:\"rapid\"} -> success toast + server OK line",
       "status": "PASS",
-      "detail": "toast=\"Приглашение отправлено\"; server line=[DEBUG] 2026-11-23T15:08:08.878Z invite:create: OK from= u1_nrxt0a to= invitee_nrxt0a matchId= bjrbh9fv; invites.json record method=rapid matchId=bjrbh9fv: true"
+      "detail": "toast=\"null\"; navigated=d75frazz; server line=[DEBUG] 2026-11-23T18:25:59.499Z invite:create: OK from= u1_45j5wk to= invitee_45j5wk matchId= d75frazz; invites.json record method=rapid matchId=d75frazz: true"
     },
     {
       "test": "X6 invitee lobby shows the invite row: inviter name, Elo 1500, method «Рапид», [Принять] -> /game?matchId",
       "status": "PASS",
-      "detail": "row=\"u1_nrxt0a (Elo 1500) — метод: РапидПринять\"; accept=</game?matchId=bjrbh9fv> Принять"
+      "detail": "row=\"u1_45j5wk (Elo 1500) — метод: РапидПринять\"; accept=</game?matchId=d75frazz> Принять"
     },
     {
       "test": "X7 invitee accepts the invite: joins the match, u1 joins, startGame delivered to both",
       "status": "PASS",
-      "detail": "invitee=\"Playing as white\" u1=\"Playing as black\" (invite-bound match bjrbh9fv)"
+      "detail": "invitee=\"Playing as black\" u1=\"Playing as white\" (invite-bound match d75frazz)"
     },
     {
       "test": "X8 game page: method select ENABLED with options Классика(standard) / Рапид(rapid)",
@@ -285,12 +285,12 @@
     {
       "test": "X10 public profiles list the finished game: opponent, per-view result (Победа/Поражение), method «Рапид»",
       "status": "PASS",
-      "detail": "invitee(seated white) end=\"Check Mate you Won! 🎉\" u1 end=\"Check Mate you lost! 😢\"; invitee profile cells=[\"2026-11-23T15:08:19.504Z\",\"u1_nrxt0a\",\"Победа\",\"Рапид\"]; u1 profile cells=[\"2026-11-23T15:08:19.504Z\",\"invitee_nrxt0a\",\"Поражение\",\"Рапид\"]"
+      "detail": "invitee(seated black) end=\"Check Mate you lost! 😢\" u1 end=\"Check Mate you Won! 🎉\"; invitee profile cells=[\"2026-11-23T18:26:08.788Z\",\"u1_45j5wk\",\"Поражение\",\"Рапид\"]; u1 profile cells=[\"2026-11-23T18:26:08.788Z\",\"invitee_45j5wk\",\"Победа\",\"Рапид\"]"
     },
     {
       "test": "X11 /api/users/stats after the game: both users games=1, winner elo>1500, loser elo<1500",
       "status": "PASS",
-      "detail": "u1 elo=1484 games=1; invitee elo=1516 games=1 (invitee seated white)"
+      "detail": "u1 elo=1516 games=1; invitee elo=1484 games=1 (invitee seated black)"
     },
     {
       "test": "X12 /user?name=<unknown> -> 404 with the Russian «Пользователь не найден»",
@@ -309,36 +309,36 @@
     }
   ],
   "invite36": {
-    "u1": "u1_nrxt0a",
-    "invitee": "invitee_nrxt0a",
+    "u1": "u1_45j5wk",
+    "invitee": "invitee_45j5wk",
     "method": "rapid",
-    "matchId": "bjrbh9fv",
-    "acceptHref": "/game?matchId=bjrbh9fv"
+    "matchId": "d75frazz",
+    "acceptHref": "/game?matchId=d75frazz"
   },
   "serverLog": [
-    "[DEBUG] 2026-11-23T15:07:56.110Z move: REJECTED reason=illegal matchId= y3oayyix turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
-    "[DEBUG] 2026-11-23T15:07:56.420Z move: REJECTED reason=illegal matchId= y3oayyix turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
-    "[DEBUG] 2026-11-23T15:07:57.082Z move: APPLIED matchId= y3oayyix turn= 0 from= 6:4 to= 4:4",
-    "[DEBUG] 2026-11-23T15:07:57.706Z move: APPLIED matchId= y3oayyix turn= 1 from= 1:4 to= 3:4",
-    "[DEBUG] 2026-11-23T15:07:58.042Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:6 to= 5:7",
-    "[DEBUG] 2026-11-23T15:07:58.381Z move: APPLIED matchId= y3oayyix turn= 1 from= 0:1 to= 2:2",
-    "[DEBUG] 2026-11-23T15:07:58.697Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:5 to= 4:2",
-    "[DEBUG] 2026-11-23T15:07:59.119Z move: APPLIED matchId= y3oayyix turn= 1 from= 0:5 to= 1:4",
-    "[DEBUG] 2026-11-23T15:07:59.439Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:4 to= 7:6",
-    "[DEBUG] 2026-11-23T15:07:59.758Z move: APPLIED matchId= y3oayyix turn= 1 from= 0:6 to= 2:5",
-    "[DEBUG] 2026-11-23T15:08:00.093Z move: APPLIED matchId= y3oayyix turn= 0 from= 7:3 to= 3:7",
-    "[DEBUG] 2026-11-23T15:08:00.443Z move: APPLIED matchId= y3oayyix turn= 1 from= 1:0 to= 2:0",
-    "[DEBUG] 2026-11-23T15:08:00.806Z move: APPLIED matchId= y3oayyix turn= 0 from= 3:7 to= 1:5",
-    "[DEBUG] 2026-11-23T15:08:17.316Z move: APPLIED matchId= bjrbh9fv turn= 0 from= 6:4 to= 4:4",
-    "[DEBUG] 2026-11-23T15:08:17.565Z move: APPLIED matchId= bjrbh9fv turn= 1 from= 1:4 to= 3:4",
-    "[DEBUG] 2026-11-23T15:08:17.759Z move: APPLIED matchId= bjrbh9fv turn= 0 from= 7:6 to= 5:7",
-    "[DEBUG] 2026-11-23T15:08:18.089Z move: APPLIED matchId= bjrbh9fv turn= 1 from= 0:1 to= 2:2",
-    "[DEBUG] 2026-11-23T15:08:18.380Z move: APPLIED matchId= bjrbh9fv turn= 0 from= 7:5 to= 4:2",
-    "[DEBUG] 2026-11-23T15:08:18.573Z move: APPLIED matchId= bjrbh9fv turn= 1 from= 0:5 to= 1:4",
-    "[DEBUG] 2026-11-23T15:08:18.823Z move: APPLIED matchId= bjrbh9fv turn= 0 from= 7:4 to= 7:6",
-    "[DEBUG] 2026-11-23T15:08:18.998Z move: APPLIED matchId= bjrbh9fv turn= 1 from= 0:6 to= 2:5",
-    "[DEBUG] 2026-11-23T15:08:19.172Z move: APPLIED matchId= bjrbh9fv turn= 0 from= 7:3 to= 3:7",
-    "[DEBUG] 2026-11-23T15:08:19.349Z move: APPLIED matchId= bjrbh9fv turn= 1 from= 1:0 to= 2:0",
-    "[DEBUG] 2026-11-23T15:08:19.494Z move: APPLIED matchId= bjrbh9fv turn= 0 from= 3:7 to= 1:5"
+    "[DEBUG] 2026-11-23T18:25:48.600Z move: REJECTED reason=illegal matchId= zg124cl5 turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
+    "[DEBUG] 2026-11-23T18:25:48.928Z move: REJECTED reason=illegal matchId= zg124cl5 turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
+    "[DEBUG] 2026-11-23T18:25:49.555Z move: APPLIED matchId= zg124cl5 turn= 0 from= 6:4 to= 4:4",
+    "[DEBUG] 2026-11-23T18:25:50.107Z move: APPLIED matchId= zg124cl5 turn= 1 from= 1:4 to= 3:4",
+    "[DEBUG] 2026-11-23T18:25:50.427Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:6 to= 5:7",
+    "[DEBUG] 2026-11-23T18:25:50.756Z move: APPLIED matchId= zg124cl5 turn= 1 from= 0:1 to= 2:2",
+    "[DEBUG] 2026-11-23T18:25:51.078Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:5 to= 4:2",
+    "[DEBUG] 2026-11-23T18:25:51.409Z move: APPLIED matchId= zg124cl5 turn= 1 from= 0:5 to= 1:4",
+    "[DEBUG] 2026-11-23T18:25:51.743Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:4 to= 7:6",
+    "[DEBUG] 2026-11-23T18:25:52.102Z move: APPLIED matchId= zg124cl5 turn= 1 from= 0:6 to= 2:5",
+    "[DEBUG] 2026-11-23T18:25:52.421Z move: APPLIED matchId= zg124cl5 turn= 0 from= 7:3 to= 3:7",
+    "[DEBUG] 2026-11-23T18:25:52.710Z move: APPLIED matchId= zg124cl5 turn= 1 from= 1:0 to= 2:0",
+    "[DEBUG] 2026-11-23T18:25:53.010Z move: APPLIED matchId= zg124cl5 turn= 0 from= 3:7 to= 1:5",
+    "[DEBUG] 2026-11-23T18:26:06.809Z move: APPLIED matchId= d75frazz turn= 0 from= 6:4 to= 4:4",
+    "[DEBUG] 2026-11-23T18:26:06.980Z move: APPLIED matchId= d75frazz turn= 1 from= 1:4 to= 3:4",
+    "[DEBUG] 2026-11-23T18:26:07.228Z move: APPLIED matchId= d75frazz turn= 0 from= 7:6 to= 5:7",
+    "[DEBUG] 2026-11-23T18:26:07.427Z move: APPLIED matchId= d75frazz turn= 1 from= 0:1 to= 2:2",
+    "[DEBUG] 2026-11-23T18:26:07.595Z move: APPLIED matchId= d75frazz turn= 0 from= 7:5 to= 4:2",
+    "[DEBUG] 2026-11-23T18:26:07.779Z move: APPLIED matchId= d75frazz turn= 1 from= 0:5 to= 1:4",
+    "[DEBUG] 2026-11-23T18:26:07.965Z move: APPLIED matchId= d75frazz turn= 0 from= 7:4 to= 7:6",
+    "[DEBUG] 2026-11-23T18:26:08.126Z move: APPLIED matchId= d75frazz turn= 1 from= 0:6 to= 2:5",
+    "[DEBUG] 2026-11-23T18:26:08.335Z move: APPLIED matchId= d75frazz turn= 0 from= 7:3 to= 3:7",
+    "[DEBUG] 2026-11-23T18:26:08.496Z move: APPLIED matchId= d75frazz turn= 1 from= 1:0 to= 2:0",
+    "[DEBUG] 2026-11-23T18:26:08.772Z move: APPLIED matchId= d75frazz turn= 0 from= 3:7 to= 1:5"
   ]
 }
