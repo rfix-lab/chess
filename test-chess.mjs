@@ -916,15 +916,16 @@ async function test() {
       pass('T30 seat-elo: registered vs guest -> { own: ' + seatUnrated.own + ', rated: false, opponent: null }');
     else fail('T30 seat-elo: registered-vs-guest shape', JSON.stringify(u1Elos));
 
-    // Phase 2: FRESH match #2 (B3 ends match #1 on U's pre-start disconnect,
-    // so its id is dead — a fresh match is required). Order matters: U must
-    // still be CONNECTED when it emits 'private-match' (a disconnected socket's
-    // packets are dropped server-side, so the match would never be created),
-    // and the disconnect comes AFTER creation — it ends match #1, but U is
-    // only the CREATOR of match #2 (never seated in it), so match #2 survives.
+    // Phase 2: FRESH match #2 (B3 ends match #1 on a pre-start disconnect,
+    // so its id is dead — a fresh match is required). U3 (connected) creates
+    // match #2, then G (match #1's player1) disconnects — the B3 rule ends
+    // match #1. G is the one who disconnects (NOT U): U must stay CONNECTED
+    // for phase 3, because a disconnected socket's packets are dropped
+    // server-side and U's phase-3 join (echo-triggered) would never arrive.
+    // G got no seat-elo payload (guests get none), so losing it costs nothing.
     seU3.emit('private-match', null);
     await Promise.race([new Promise(r => seU3.once('private-match', r)), sleep(3000)]);
-    seU.disconnect();
+    seG.disconnect();
     await sleep(300);
     await sleep(700);
     if (seU2s) seU2.emit('auth', seU2s, seMatch2);
@@ -965,7 +966,7 @@ async function test() {
         typeof u1Rated.opponent === 'number' && u2Rated && u2Rated !== u1Rated && u2Rated.rated === true &&
         u1Rated.opponent === u2Rated.own && u2Rated.opponent === u1Rated.own)
       pass('T30 seat-elo: registered vs registered -> both rated: true, opponent=<other elo> (reciprocal)');
-    else fail('T30 seat-elo: registered-vs-registered reciprocal', `u1All=${JSON.stringify(u1Elos)} u1rated=${JSON.stringify(u1Rated)} u2=${JSON.stringify(u2Rated)}`);
+    else fail('T30 seat-elo: registered-vs-registered reciprocal', `u1=${JSON.stringify(u1Elos)} u2=${JSON.stringify(u2Rated)}`);
 
     // Shape discipline: seat payloads must NOT carry the game-end keys (the
     // client disambiguates the two 'elo' payload shapes by keys).
