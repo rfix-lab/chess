@@ -158,11 +158,23 @@ let browser = null;
 const white = { __ctx: null, __consoleErrors: [] };
 const black = { __ctx: null, __consoleErrors: [] };
 const restore = { __ctx: null, __consoleErrors: [] };
+// Contract 36: extra isolated contexts for the users-directory rows.
+// invitee (registered target, receives the push), u1 (inviter on /users),
+// u2 (the target's own profile/guest-view pages), ghost (fake-username probe).
+const invitee = { __ctx: null, __consoleErrors: [] };
+const u1 = { __ctx: null, __consoleErrors: [] };
+const u2 = { __ctx: null, __consoleErrors: [] };
+const ghost = { __ctx: null, __consoleErrors: [] };
+// u3: a third registered user with a NON-default Elo (1543) — its only purpose
+// is to make the /users stats sort (elo desc) observable and the profile
+// opponent cells unambiguous (each user has a distinct name).
+const u3 = { __ctx: null, __consoleErrors: [] };
 
 try {
   // ---------- server (async spawn, never spawnSync) ----------
+  const DATA_DIR = fs.mkdtempSync('/tmp/e2e-data-');
   serverProc = spawn(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.js')], {
-    env: { ...process.env, DEBUG: '1', PORT: String(PORT), DATA_DIR: fs.mkdtempSync('/tmp/e2e-data-') },
+    env: { ...process.env, DEBUG: '1', PORT: String(PORT), DATA_DIR },
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: path.dirname(fileURLToPath(import.meta.url)) + '/..',
   });
@@ -646,22 +658,442 @@ try {
         if (!form || !authed || !ok) return false;
         const formHidden = form.classList.contains('hide') && !form.classList.contains('show');
         const authedShown = authed.classList.contains('show') && !authed.classList.contains('hide');
-        return formHidden && authedShown && ok.textContent.indexOf(u) !== -1;
+        // Contract 36 adaptation: a logged-in lobby ALSO hides [Вход]/[Регистрация]
+        // (user feedback: «кнопка вход не нужна, если я уже залогинился»).
+        const loginBtn = document.getElementById('login-button');
+        const registerBtn = document.getElementById('register-button');
+        const authBtnsHidden = !!loginBtn && loginBtn.classList.contains('hide')
+          && !!registerBtn && registerBtn.classList.contains('hide');
+        return formHidden && authedShown && authBtnsHidden && ok.textContent.indexOf(u) !== -1;
       }, uname);
     }, 'lobby logged-in state after fresh load', 15000);
-    a1Detail = `user=${uname}; form hidden, Кабинет/Выход visible, success line shows the username`;
+    a1Detail = `user=${uname}; form hidden, [Вход]/[Регистрация] hidden (contract 36), Кабинет/Выход visible, success line shows the username`;
   } catch (e) {
     a1Ok = false;
     a1Detail = 'restore flow error: ' + (e && e.message || e);
   }
   logRow('A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200)', a1Ok ? 'PASS' : 'FAIL', a1Detail);
 
+  // ---------- Contract 36: users directory, invite-by-method, public profile ----------
+  // Two fresh registered users (u1 the inviter, invitee the target); a raw
+  // socket does signup+signin for each (same as A1). u1 then opens /users and
+  // right-clicks the invitee row -> menu -> «Рапид» -> invite:create {method:'rapid'}.
+  // The invitee's LOBBY shows the pushed invite row (method «Рапид», Elo 1500);
+  // the invitee accepts -> joins the match, u1 joins -> startGame on both.
+  // The game page's method select must be ENABLED with both options. Finally
+  // the public profile (/user?name=) lists the finished game with the method
+  // label «Рапид» + per-view result, a fresh visitor sees the enabled select
+  // too, /api/users/stats reflects the new elo+game counts, and an unknown
+  // username renders the Russian 404 message.
+  {
+    const randsuf = Math.random().toString(36).slice(2, 8);
+    const u1Name = 'u1_' + randsuf;
+    const invName = 'invitee_' + randsuf;
+    const u3Name = 'u3_' + randsuf;   // distinct-Elo spectator (1543)
+    const upass = 'contract36-pass';
+    const mkSession = async (name) => {
+      const r = io(BASE, { transports: ['websocket'] });
+      await new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error('raw socket: no connect (' + name + ')')), 10000);
+        r.on('connect', () => { clearTimeout(to); res(null); });
+        r.on('connect_error', e => { clearTimeout(to); rej(e); });
+      });
+      const sid = await new Promise((resolve, reject) => {
+        const to = setTimeout(() => reject(new Error(name + ': no session after signin')), 10000);
+        r.on('signup', (valid) => {
+          if (valid !== 1) { clearTimeout(to); return reject(new Error(name + ': signup invalid code ' + valid)); }
+          r.emit('signin', { username: name, password: upass });
+        });
+        r.on('signin', (valid, s) => { if (valid && s) { clearTimeout(to); resolve(s); } });
+        r.emit('signup', { username: name, password: upass });
+      });
+      r.close();
+      return sid;
+    };
+
+    let x1Ok = false, x1Detail = '';
+    try {
+      const sidU1 = await mkSession(u1Name);
+      const sidInv = await mkSession(invName);
+      const sidU3 = await mkSession(u3Name);
+      u1.sessionID = sidU1;
+      invitee.sessionID = sidInv;
+      u3.sessionID = sidU3;
+      x1Ok = true;
+      x1Detail = `u1=${u1Name}, invitee=${invName}, u3=${u3Name} (all registered, Elo 1500, 0 games)`;
+    } catch (e) {
+      x1Detail = 'signup flow error: ' + (e && e.message || e);
+    }
+    logRow('X1 contract 36: two users registered (inviter + invitee) for the users-directory flow', x1Ok ? 'PASS' : 'FAIL', x1Detail);
+
+    // X2: the /users page is PUBLIC (ghost context, no cookie at all).
+    const ghostPage = await mkPage(ghost, 'ghost');
+    let x2Ok = false, x2Detail = '';
+    try {
+      const res = await fetch(BASE + '/api/users/stats');
+      const stats = res.ok ? await res.json() : null;
+      const ok = Array.isArray(stats) && stats.some(s => s.username === u1Name && s.elo === 1500 && s.games === 0)
+        && stats.some(s => s.username === invName && s.elo === 1500 && s.games === 0)
+        && stats.some(s => s.username === u3Name && s.elo === 1500 && s.games === 0);
+      x2Ok = !!ok;
+      x2Detail = `GET /api/users/stats (no auth) status=${res.status}: users with elo 1500 / 0 games incl. all three fresh users: ${ok}; count=${Array.isArray(stats) ? stats.length : 'n/a'}`;
+      await ghostPage.goto(BASE + '/users', { waitUntil: 'networkidle2' });
+      await waitFor(async () => (await ghostPage.evaluate(() => {
+        const tb = document.getElementById('users-body');
+        return tb && tb.querySelectorAll('tr[data-username]').length >= 3;
+      })) === true, 'guest /users directory to render', 15000);
+      x2Ok = x2Ok && (await ghostPage.evaluate((inv) => {
+        const row = document.querySelector(`tr[data-username="${inv}"]`);
+        return row && row.querySelectorAll('td').length === 3;
+      }, invName));
+      // Sort order (contract 36 §3): all three fresh users share elo 1500, so
+      // the stats list must order them by username ASC — invitee < u1 < u3.
+      const order = await ghostPage.evaluate(() => {
+        const tb = document.getElementById('users-body');
+        return Array.from(tb.querySelectorAll('tr[data-username]')).map(r => r.dataset.username);
+      });
+      const iInv = order.indexOf(invName), iU1 = order.indexOf(u1Name), iU3 = order.indexOf(u3Name);
+      x2Ok = x2Ok && iInv !== -1 && iU1 !== -1 && iU3 !== -1 && iInv < iU1 && iU1 < iU3;
+      x2Detail = x2Detail + `; page row order ${JSON.stringify(order)} (want invitee<u1<u3): ${iInv < iU1 && iU1 < iU3}`;
+    } catch (e) {
+      x2Ok = false;
+      x2Detail = 'guest /users error: ' + (e && e.message || e);
+    }
+    logRow('X2 /users public directory: guest sees the table; /api/users/stats lists all three users (elo 1500, 0 games) in elo-desc/name-asc order', x2Ok ? 'PASS' : 'FAIL', x2Detail);
+
+    // X3-X6: logged-in inviter on /users -> right-click the target row ->
+    // menu -> «Рапид» -> invite:create {method:'rapid'} -> toasts + server log.
+    const u1Page = await mkPage(u1, 'u1');
+    await u1.__ctx.setCookie({ name: 'sessionID', value: u1.sessionID, url: BASE });
+    await u1Page.goto(BASE + '/users', { waitUntil: 'networkidle2' });
+
+    let x3Ok = false, x3Detail = '';
+    try {
+      await u1Page.goto(BASE + '/users', { waitUntil: 'networkidle2' });
+      // Row availability is a single post-goto read. networkidle2 can resolve
+      // before the client's in-place row enhancement runs, so a naive immediate
+      // probe races the enhancement; read the row once (it is server-rendered
+      // into the HTML, so it is present) and fall back to a short poll only if
+      // it is not there yet (client rebuild path).
+      const rowPresent = (inv) => u1Page.evaluate((u) => !!document.querySelector(`tr[data-username="${u}"]`), inv);
+      let found = await rowPresent(invName);
+      if (!found) {
+        const t0 = Date.now();
+        while (!found && Date.now() - t0 < 10000) {
+          await new Promise(r => setTimeout(r, 50));
+          found = await rowPresent(invName);
+        }
+      }
+      if (!found) {
+        const diag = await u1Page.evaluate((inv) => ({
+          url: location.href,
+          anyRows: document.querySelectorAll('tr[data-username]').length,
+          sample: (document.getElementById('users-body') || document.body).innerHTML.slice(0, 300),
+        }), invName);
+        x3Detail = `invitee row NOT present after goto+poll; DIAG=${JSON.stringify(diag).slice(0, 300)}`;
+      }
+      const rowInfo = await u1Page.evaluate((inv) => {
+        const row = document.querySelector(`tr[data-username="${inv}"]`);
+        if (!row) return null;
+        const tds = Array.from(row.querySelectorAll('td'));
+        return { cells: tds.map(t => t.textContent.trim()), self: row.classList.contains('user-self') };
+      }, invName);
+      const x3row = rowInfo && rowInfo.cells.length === 3 && rowInfo.cells[1] === '1500' && rowInfo.cells[2] === '0' && !rowInfo.self;
+      x3Ok = !!found && !!x3row;
+      if (x3Ok) x3Detail = `invitee row present post-goto (found=${found}); cells=${JSON.stringify(rowInfo && rowInfo.cells)}, self=${rowInfo && rowInfo.self} (want name/1500/0, self=false)`;
+    } catch (e) {
+      x3Detail = 'invitee row error: ' + (e && e.message || e);
+    }
+    logRow('X3 /users lists the invitee with Elo 1500 and 0 games (row not marked self for the inviter)', x3Ok ? 'PASS' : 'FAIL', x3Detail);
+
+    let x4Ok = false, x4Detail = '';
+    try {
+      await u1Page.evaluate((inv) => {
+        const row = document.querySelector(`tr[data-username="${inv}"]`);
+        const r = row.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }, invName).then(p => u1Page.mouse.click(p.x, p.y, { button: 'right' }));
+      const menu = await waitFor(async () => u1Page.evaluate((inv) => {
+        const m = document.getElementById('user-context-menu');
+        if (!m || m.classList.contains('hide')) return null;
+        const items = Array.from(m.querySelectorAll('.user-menu-item')).map(i => i.textContent);
+        const head = m.querySelector('.user-menu-head');
+        return { head: head ? head.textContent : '', items };
+      }, invName), 'invite context menu to open', 10000);
+      x4Ok = !!menu && String(menu.head || '').indexOf(invName) !== -1 && menu.items.some(t => t === 'Рапид') && menu.items.some(t => t === 'Классика');
+      x4Detail = `menu head="${menu ? menu.head : 'NONE'}" items=${JSON.stringify(menu ? menu.items : [])}`;
+    } catch (e) {
+      x4Detail = 'menu error: ' + (e && e.message || e);
+    }
+    logRow('X4 right-click on a users row opens the invite menu with method choice (Классика / Рапид)', x4Ok ? 'PASS' : 'FAIL', x4Detail);
+
+    let x5Ok = false, x5Detail = '', inviteMatchId = null;
+    try {
+      await u1Page.evaluate((inv) => {
+        const m = document.getElementById('user-context-menu');
+        const item = m && Array.from(m.querySelectorAll('.user-menu-method')).find(i => i.textContent === 'Рапид');
+        if (item) item.click();
+      }, invName);
+      const toast = await waitFor(async () => {
+        const t = await u1Page.evaluate(() => {
+          const el = document.querySelector('.toast');
+          return el ? el.textContent : null;
+        });
+        return (t === 'Приглашение отправлено') ? t : null;
+      }, 'success toast after invite:create', 10000);
+      const inviteLine = serverLog().split('\n').filter(l => l.includes('invite:create: OK') && l.includes('from= ' + u1Name) && l.includes('to= ' + invName));
+      // The stored invite record (A2's lib/invites.js persists to DATA_DIR/invites.json)
+      // carries the chosen method — it is the authoritative source for the match id.
+      let invitesOk = null, inviteMatchId = null;
+      try {
+        const invJson = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'invites.json'), 'utf8'));
+        const rec = invJson.find(r => r && r.to === invName && r.from === u1Name);
+        invitesOk = !!rec && rec.method === 'rapid' && rec.matchId !== undefined;
+        if (rec && rec.matchId) inviteMatchId = String(rec.matchId);
+      } catch (e) { invitesOk = null; }
+      x5Ok = toast === 'Приглашение отправлено' && inviteLine.length > 0 && invitesOk === true;
+      x5Detail = `toast="${toast}"; server line=${(inviteLine[0] || 'NONE').slice(0, 140)}; invites.json record method=rapid matchId=${inviteMatchId}: ${invitesOk}`;
+      results.invite36 = { u1: u1Name, invitee: invName, method: 'rapid', matchId: inviteMatchId };
+    } catch (e) {
+      x5Detail = 'invite flow error: ' + (e && e.message || e);
+    }
+    logRow('X5 users-page invite: «Рапид» chosen -> invite:create {method:"rapid"} -> success toast + server OK line', x5Ok ? 'PASS' : 'FAIL', x5Detail);
+
+    // X6: the INVITEE's lobby shows the pushed invite row (real-time delivery).
+    const inviteePage = await mkPage(invitee, 'invitee');
+    await invitee.__ctx.setCookie({ name: 'sessionID', value: invitee.sessionID, url: BASE });
+    // Let u1's /users-page socket drain before the invitee loads the lobby: the
+    // invitee must find the player1 slot FREE (u1 has not joined yet, but the
+    // /users page that created the invite must be gone, else its socket would
+    // still hold a seat and the invitee's join would be refused).
+    await sleep(500);
+    await inviteePage.goto(BASE + '/index', { waitUntil: 'networkidle2' });
+    let x6Ok = false, x6Detail = '';
+    try {
+      await waitFor(async () => (await inviteePage.evaluate((inv) => {
+        const list = document.getElementById('invites-list');
+        return list && list.textContent.indexOf(inv) !== -1;
+      }, u1Name)) === true, 'invitee lobby to show the invite', 15000);
+      const rowText = await inviteePage.evaluate((inv) => {
+        const list = document.getElementById('invites-list');
+        const row = list && Array.from(list.children).find(r => r.textContent.indexOf(inv) !== -1);
+        return row ? row.textContent : '';
+      }, u1Name);
+      const accept = await inviteePage.evaluate((inv) => {
+        const list = document.getElementById('invites-list');
+        const row = list && Array.from(list.children).find(r => r.textContent.indexOf(inv) !== -1);
+        const a = row && row.querySelector('a.invite-accept');
+        return a ? { href: a.getAttribute('href'), label: a.textContent } : null;
+      }, u1Name);
+      x6Ok = rowText.indexOf('Рапид') !== -1 && rowText.indexOf('1500') !== -1 && !!accept && (accept.href || '').indexOf('matchId=') !== -1;
+      x6Detail = `row="${rowText.slice(0, 120)}"; accept=<${accept ? accept.href : 'NONE'}> ${accept ? accept.label : ''}`;
+      results.invite36 = Object.assign(results.invite36 || {}, { acceptHref: accept && accept.href });
+    } catch (e) {
+      x6Detail = 'invitee lobby error: ' + (e && e.message || e);
+    }
+    logRow('X6 invitee lobby shows the invite row: inviter name, Elo 1500, method «Рапид», [Принять] -> /game?matchId', x6Ok ? 'PASS' : 'FAIL', x6Detail);
+
+    // X7: the invitee accepts -> joins the match (seats into player1, the
+    // host slot); u1 joins second -> startGame fires for BOTH. Navigate u1 in
+    // the background (no await before the wait) so both seatings happen inside
+    // one 20s window; the status text flips to "Playing as ..." only AFTER
+    // startGame, so each player's wait covers the whole round-trip.
+    let x7Ok = false, x7Detail = '';
+    try {
+      const href = results.invite36 && results.invite36.acceptHref;
+      const matchId36 = results.invite36 && results.invite36.matchId;
+      await inviteePage.goto(BASE + (href || '/game?matchId='), { waitUntil: 'networkidle2' });
+      // u1 joins the SAME invite-bound match (allowed: invite.from). Fire &
+      // forget — the combined wait below covers both players' startGame.
+      void (async () => {
+        try { await u1Page.goto(BASE + '/game?matchId=' + (matchId36 || ''), { waitUntil: 'networkidle2' }); }
+        catch (e) { /* reported through the seating waits */ }
+      })();
+      const seated = await waitFor(async () => {
+        const sInv = await inviteePage.evaluate(() => document.getElementById('status').innerText).catch(() => '');
+        const sU1 = await u1Page.evaluate(() => document.getElementById('status').innerText).catch(() => '');
+        if (/^Playing as (white|black)$/.test(sInv) && /^Playing as (white|black)$/.test(sU1)) return { inv: sInv, u1: sU1 };
+        return null;
+      }, 'both players seated (startGame on both) in the invite match', 20000);
+      x7Ok = true;
+      x7Detail = `invitee="${seated.inv}" u1="${seated.u1}" (invite-bound match ${matchId36})`;
+    } catch (e) {
+      x7Detail = 'accept flow error: ' + (e && e.message || e);
+    }
+    logRow('X7 invitee accepts the invite: joins the match, u1 joins, startGame delivered to both', x7Ok ? 'PASS' : 'FAIL', x7Detail);
+
+    // X8: the game page's method select is ENABLED with Классика/Рапид.
+    let x8Ok = false, x8Detail = '';
+    try {
+      const probe = await u1Page.evaluate(() => {
+        const sel = document.getElementById('method-select');
+        if (!sel) return null;
+        const opts = Array.from(sel.options).map(o => ({ value: o.value, label: o.textContent }));
+        return { disabled: sel.disabled, value: sel.value, opts };
+      });
+      x8Ok = !!probe && probe.disabled === false && probe.opts.length === 2
+        && probe.opts.some(o => o.value === 'standard' && o.label === 'Классика')
+        && probe.opts.some(o => o.value === 'rapid' && o.label === 'Рапид');
+      x8Detail = JSON.stringify(probe);
+    } catch (e) {
+      x8Detail = 'method select error: ' + (e && e.message || e);
+    }
+    logRow('X8 game page: method select ENABLED with options Классика(standard) / Рапид(rapid)', x8Ok ? 'PASS' : 'FAIL', x8Detail);
+
+    // X9: a FRESH logged-in visitor on the same match sees the same select
+    // (u2 context — also proves the select is not tied to the creator socket).
+    // The visitor is NOT in the invite, so the server answers gameNotFound and
+    // the page redirects to /index. A `window` global is per-document (reset by
+    // the redirect), so the in-page hook persists the select snapshot to
+    // sessionStorage (same-tab scope — survives the redirect) and we read it back.
+    let x9Ok = false, x9Detail = '';
+    try {
+      const sidU2 = await mkSession('u2_' + randsuf);
+      const u2Page = await mkPage(u2, 'u2');
+      await u2.__ctx.setCookie({ name: 'sessionID', value: sidU2, url: BASE });
+      await u2Page.evaluateOnNewDocument(() => {
+        document.addEventListener('DOMContentLoaded', () => {
+          try {
+            const sel = document.getElementById('method-select');
+            if (sel) sessionStorage.setItem('__x9probe', JSON.stringify({ disabled: sel.disabled, value: sel.value, count: sel.options.length }));
+          } catch (e) {
+            try { sessionStorage.setItem('__x9probe', JSON.stringify({ err: String(e) })); } catch (e2) {}
+          }
+        });
+      });
+      await u2Page.goto(BASE + '/game?matchId=' + (results.invite36 && results.invite36.matchId || ''), { waitUntil: 'networkidle2' });
+      await sleep(700); // allow the gameNotFound redirect if the visitor is bounced
+      const raw = await u2Page.evaluate(() => { try { return sessionStorage.getItem('__x9probe'); } catch (e) { return null; } });
+      const probe = raw ? JSON.parse(raw) : null;
+      x9Ok = !!probe && probe.disabled === false && probe.count === 2 && probe.value === 'standard';
+      x9Detail = 'probe (sessionStorage, survives redirect) = ' + JSON.stringify(probe);
+    } catch (e) {
+      x9Detail = 'fresh visitor select error: ' + (e && e.message || e);
+    }
+    logRow('X9 fresh logged-in visitor: same match page, method select enabled (2 options) before any redirect', x9Ok ? 'PASS' : 'FAIL', x9Detail);
+
+    // X10: public profile — the finished game is listed (Дата/Соперник/Результат/Метод),
+    // newest first, method label «Рапид», per-view result; elo updated in the directory.
+  let invColor = null;   // the invitee's seat color (0 white / 1 black), known after X10
+  let x10Ok = false, x10Detail = '';
+    try {
+      // End the invite match with a fast scholar's mate (white wins in 6 moves).
+      // `side` in plan36 is the SERVER color; the mover page depends on who was
+      // seated as white (server seating order), and the black page's board is
+      // 180-degree rotated — visual coords = rot(server coords) for black.
+      invColor = (await inviteePage.evaluate(() => window.__chessDebug.myColor));
+      const whitePage = invColor === 0 ? inviteePage : u1Page; // white = player1
+      const blackPage = invColor === 0 ? u1Page : inviteePage;
+      const pageFor = (side) => (side === 0 ? whitePage : blackPage);
+      const rot36 = (p) => ({ x: 7 - p.x, y: 7 - p.y });
+      const drive36 = async (pg, vFrom, vTo) => {
+        const p = await pg.evaluate((fx, fy, tx, ty) => {
+          const r = document.getElementById('cnv').getBoundingClientRect();
+          const c = side_len / 8;
+          return { a: { x: r.left + offset_x + (fx + 0.5) * c, y: r.top + offset_y + (fy + 0.5) * c },
+                   b: { x: r.left + offset_x + (tx + 0.5) * c, y: r.top + offset_y + (ty + 0.5) * c } };
+        }, vFrom.x, vFrom.y, vTo.x, vTo.y);
+        await pg.mouse.click(p.a.x, p.a.y);
+        await sleep(70);
+        await pg.mouse.click(p.b.x, p.b.y);
+      };
+      for (const m of plan) {
+        const page = pageFor(m.side);
+        await waitFor(async () => (await page.evaluate(() => {
+          try { return can_move === true && !is_being_validated; } catch (e) { return false; }
+        })) === true,
+          `mover turn step36 (white=${invColor === 0 ? 'invitee' : 'u1'})`, 15000);
+        const svFrom = toXY(m.w), svTo = toXY(m.b);
+        const vFrom = (m.side === 1) ? rot36(svFrom) : svFrom;
+        const vTo = (m.o0) ? { x: 6, y: 7 } : ((m.side === 1) ? rot36(svTo) : svTo); // O-O -> g1
+        await drive36(page, vFrom, vTo);
+        await Promise.all([
+          waitFor(async () => (await inviteePage.evaluate(() => !is_being_validated)) === true, 'invitee settled'),
+          waitFor(async () => (await u1Page.evaluate(() => !is_being_validated)) === true, 'u1 settled'),
+        ]);
+      }
+      await sleep(400); // gameEnd + status update land right after the last validated
+      const endInv = await inviteePage.evaluate(() => document.getElementById('status').innerText);
+      const endU1 = await u1Page.evaluate(() => document.getElementById('status').innerText);
+
+      // Per-view result on each player's public profile. A profile row's
+      // OPPONENT column (cell 1) names the other player — select the row whose
+      // cell 1 is the target user (matching on the whole textContent wrongly
+      // matched the opponent's row, whose opponent-cell contains this user).
+      const ghost2 = await mkPage(ghost, 'ghost-profile');
+      await ghost2.goto(BASE + '/user?name=' + encodeURIComponent(invName), { waitUntil: 'networkidle2' });
+      const profile = await ghost2.evaluate((name) => {
+        const rows = Array.from(document.querySelectorAll('#profile-games-body tr'))
+          .filter(r => { const t = r.querySelectorAll('td'); return t.length >= 2 && t[1].textContent.trim() === name; });
+        if (!rows.length) return { rows: 0, cells: [] };
+        return { rows: rows.length, cells: Array.from(rows[0].querySelectorAll('td')).map(t => t.textContent.trim()) };
+      }, u1Name);
+      await ghost2.goto(BASE + '/user?name=' + encodeURIComponent(u1Name), { waitUntil: 'networkidle2' });
+      const u1Profile = await ghost2.evaluate((name) => {
+        const rows = Array.from(document.querySelectorAll('#profile-games-body tr'))
+          .filter(r => { const t = r.querySelectorAll('td'); return t.length >= 2 && t[1].textContent.trim() === name; });
+        if (!rows.length) return { rows: 0, cells: [] };
+        return { rows: rows.length, cells: Array.from(rows[0].querySelectorAll('td')).map(t => t.textContent.trim()) };
+      }, invName);
+      // White (the invitee in this seating) won the mate; per-view: winner
+      // «Победа», loser «Поражение»; both rows carry the «Рапид» label.
+      const wantInvResult = invColor === 0 ? 'Победа' : 'Поражение';
+      const wantU1Result = invColor === 0 ? 'Поражение' : 'Победа';
+      x10Ok = profile.rows === 1 && profile.cells.length === 4
+        && profile.cells[1] === u1Name && profile.cells[2] === wantInvResult && profile.cells[3] === 'Рапид'
+        && u1Profile.rows === 1 && u1Profile.cells[1] === invName && u1Profile.cells[2] === wantU1Result && u1Profile.cells[3] === 'Рапид';
+      x10Detail = `invitee(seated ${invColor === 0 ? 'white' : 'black'}) end="${endInv}" u1 end="${endU1}"; invitee profile cells=${JSON.stringify(profile.cells)}; u1 profile cells=${JSON.stringify(u1Profile.cells)}`;
+    } catch (e) {
+      x10Detail = 'profile error: ' + (e && e.message || e);
+    }
+    logRow('X10 public profiles list the finished game: opponent, per-view result (Победа/Поражение), method «Рапид»', x10Ok ? 'PASS' : 'FAIL', x10Detail);
+
+    // X11: /api/users/stats reflects the finished game (elo changed from 1500, games=1).
+    let x11Ok = false, x11Detail = '';
+    try {
+      const res = await fetch(BASE + '/api/users/stats');
+      const stats = await res.json();
+      const u1s = stats.find(s => s.username === u1Name);
+      const inVs = stats.find(s => s.username === invName);
+      // White won: the winner's elo rises above 1500, the loser's drops below,
+      // and both users now count exactly 1 game in the directory.
+      const winner = invColor === 0 ? inVs : u1s;
+      const loser = invColor === 0 ? u1s : inVs;
+      x11Ok = !!u1s && !!inVs && u1s.games === 1 && inVs.games === 1
+        && winner.elo > 1500 && loser.elo < 1500;
+      x11Detail = `u1 elo=${u1s && u1s.elo} games=${u1s && u1s.games}; invitee elo=${inVs && inVs.elo} games=${inVs && inVs.games} (invitee seated ${invColor === 0 ? 'white' : 'black'})`;
+    } catch (e) {
+      x11Detail = 'stats after game error: ' + (e && e.message || e);
+    }
+    logRow('X11 /api/users/stats after the game: both users games=1, winner elo>1500, loser elo<1500', x11Ok ? 'PASS' : 'FAIL', x11Detail);
+
+    // X12: unknown username -> 404 with the Russian message.
+    let x12Ok = false, x12Detail = '';
+    try {
+      const res = await fetch(BASE + '/user?name=ghost_' + randsuf);
+      const html = await res.text();
+      x12Ok = res.status === 404 && html.indexOf('Пользователь не найден') !== -1;
+      x12Detail = `status=${res.status}; contains «Пользователь не найден»: ${html.indexOf('Пользователь не найден') !== -1}`;
+    } catch (e) {
+      x12Detail = '404 probe error: ' + (e && e.message || e);
+    }
+    logRow('X12 /user?name=<unknown> -> 404 with the Russian «Пользователь не найден»', x12Ok ? 'PASS' : 'FAIL', x12Detail);
+  }
+
   // ---------- console errors ----------
   const wErr = white.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
   const bErr = black.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
   const mErr = restore.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
+  // Guest / unauthed pages hit /api/me on load (401 expected — the restore
+  // check) and a bounced visitor may land on /index; the browser's "Failed to
+  // load resource" console line for those is the same class as the net::ERR
+  // noise the main C-err row already ignores.
+  const cErr = [...invitee.__consoleErrors, ...u1.__consoleErrors, ...u2.__consoleErrors, ...ghost.__consoleErrors]
+    .filter(e => !/favicon|net::ERR|Failed to load resource|\/api\/me/i.test(e));
   logRow('C-err no JS console/page errors on white or black page', wErr.length === 0 && bErr.length === 0 && mErr.length === 0 ? 'PASS' : 'FAIL',
     `white errors=${JSON.stringify(wErr).slice(0, 200)}; black errors=${JSON.stringify(bErr).slice(0, 200)}; lobby(restore) errors=${JSON.stringify(mErr).slice(0, 200)}`);
+  logRow('C-err36 no JS console/page errors on the contract-36 pages (users, invitee lobby, game, profiles)', cErr.length === 0 ? 'PASS' : 'FAIL',
+    `users/invitee/game/profile errors=${JSON.stringify(cErr).slice(0, 300)}`);
 
   results.serverLog = serverLog().split('\n').filter(l => l.includes('move:'));
   results.rows = rows;
@@ -678,6 +1110,11 @@ try {
   try { if (white.__ctx) await white.__ctx.close(); } catch {}
   try { if (black.__ctx) await black.__ctx.close(); } catch {}
   try { if (restore.__ctx) await restore.__ctx.close(); } catch {}
+  try { if (invitee.__ctx) await invitee.__ctx.close(); } catch {}
+  try { if (u1.__ctx) await u1.__ctx.close(); } catch {}
+  try { if (u2.__ctx) await u2.__ctx.close(); } catch {}
+  try { if (ghost.__ctx) await ghost.__ctx.close(); } catch {}
+  try { if (u3.__ctx) await u3.__ctx.close(); } catch {}
   try { if (serverProc && serverProc.exitCode === null) serverProc.kill('SIGTERM'); } catch {}
   await sleep(150);
   try {
