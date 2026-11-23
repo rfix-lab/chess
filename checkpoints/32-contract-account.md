@@ -91,3 +91,17 @@ Gates: node --check each touched js; npm test green; E2E (bash test/e2e-gate.sh 
 agent's heavy suite if ports collide — harness uses its own ephemeral ports, fine.
 
 ## UI language: Russian for all user-visible texts (keep ids/classes English).
+
+## Addendum (2026-11-23 12:25, owner bug report): lobby loses login on refresh
+Root cause (verified in HEAD 375d48a): server sessions are ALREADY persistent
+(data/sessions.json since B6, 7-day expiry; client cookie 1 day). The LOBBY UI simply
+never checks the cookie on page load: index.ejs renders the logged-out form unconditionally
+and indexSockets.js has no restore-on-load; only the game page ever sends the cookie
+(via 'auth'). Fix (no Redis):
+- S-A ADD: HTTP `GET /api/me` — parses the sessionID cookie (same regex as the socket
+  handshake logger, src/index.js ~256), validateSession -> 200 {username, elo} or 401 {}.
+  Thin route, no new deps. T31 row: valid cookie -> 200 with username; absent/bogus -> 401.
+- S-B ADD: on lobby load, fetch('/api/me'); on 200 render the logged-in state exactly as
+  after signin (hide form, 'Вы вошли как <name>', Play as user, Кабинет/Выход visible);
+  on 401 show the form (current default). Also verify the cookie survives F5 (writeCookie
+  day=1 — yes) and that Выход clears cookie + reloads.
