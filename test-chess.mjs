@@ -762,10 +762,15 @@ async function test() {
   b3b.on('gameEnd', d => { b3EndB = d; });
   b3a.emit('auth', null, null);
   b3b.emit('auth', null, null);
-  await sleep(500);
+  // T33 hardening: wait for the server to seat the pair (both startGame
+  // echoes) instead of a fixed 500 ms — under the parallel-load runner the
+  // seat round-trip can exceed it, leaving b3Match null.
+  await waitFor(() => b3Match !== null, 5000);
   if (b3Match !== null) {
     b3a.disconnect();
-    await sleep(300);
+    // T33 hardening: wait for the immediate gameEnd on the winner side
+    // (the pre-start opponent_disconnect path) instead of a fixed 300 ms.
+    await waitFor(() => (b3aColor === 0 ? b3EndB : b3EndA) !== null, 3000);
     const winnerEnd = b3aColor === 0 ? b3EndB : b3EndA; // b3b stayed connected
     if (winnerEnd && winnerEnd.reason === 'opponent_disconnect' && winnerEnd.result === 'win')
       pass('B3: pre-start disconnect → opponent gets gameEnd(opponent_disconnect, win) immediately');
@@ -782,7 +787,11 @@ async function test() {
     b3c.on('reconnected', () => { b3cRecon = true; });
     b3c.on('startGame', () => { b3cStart = true; });
     b3c.emit('reconnect', { gameId: b3Match, color: b3bColor, sessionID: null, prevSocketId: null });
-    await sleep(300);
+    // T33 hardening: wait for the reconnect OUTCOME (gameNotFound / reconnected
+    // / startGame) instead of a fixed 300 ms — this is a negative assertion
+    // (expecting gameNotFound), so we wait for the FIRST emitted outcome; if
+    // the wrong one arrives first the assertion below still catches it.
+    await waitFor(() => b3cNotFound || b3cRecon || b3cStart, 3000);
     if (b3cNotFound && !b3cRecon && !b3cStart)
       pass('B3: dead pre-start match removed (reconnect → gameNotFound, no ghost re-seat)');
     else fail('B3: dead pre-start match removed', `b3Match=${b3Match} notFound=${b3cNotFound} recon=${b3cRecon} start=${b3cStart}`);
@@ -811,7 +820,10 @@ async function test() {
   b4b.on('validated', (board, turn, extra) => { b4bValid++; if (!(extra && extra.rejected)) b4MoveApplied = true; });
   b4w.emit('auth', null, null);
   b4b.emit('auth', null, null);
-  await sleep(500);
+  // T33 hardening: wait for the server to seat the pair (both startGame
+  // echoes) instead of a fixed 500 ms — under the parallel-load runner the
+  // seat round-trip can exceed it, leaving b4Match null.
+  await waitFor(() => b4Match !== null, 5000);
   if (b4Match !== null) {
     // One move by white (e2-e4) so moveHistory.length = 1.
     // T33 hardening: wait for the move to be APPLIED (a 'validated' echo on the
@@ -840,7 +852,10 @@ async function test() {
     b4w2.on('gameNotFound', () => { b4NotFound = true; });
     b4w2.on('gameEnd', d => { b4W2End = d; });
     b4w2.emit('reconnect', { gameId: b4Match, color: b4wColor, sessionID: null, prevSocketId: oldWId });
-    await sleep(300);
+    // T33 hardening: wait for an OUTCOME (reconnected or gameNotFound) instead
+    // of a fixed 300 ms — the reconnect round-trip is the slowest event in
+    // this block under load and the row flaked when it lagged the assertion.
+    await waitFor(() => b4Recon !== null || b4NotFound, 3000);
     if (!b4NotFound && b4Recon && b4Recon.color === b4wColor && b4Recon.gid === b4Match &&
         Array.isArray(b4Recon.boardState) && b4Recon.boardState.length === 8 &&
         (b4Recon.turnState === 0 || b4Recon.turnState === 1))
