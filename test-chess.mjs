@@ -1,8 +1,10 @@
 import { io } from 'socket.io-client';
 import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcrypt';
 import { loadUsersFile, authenticateUser, validateSession, saveUsersFile, loadSessionsFile, saveSessionsFile, attachSessionsToUsers, USERS_CSV } from './src/lib/auth.js';
-import { loadGames, GAMES_CSV } from './src/lib/games.js';
+import { loadGames, GAMES_CSV, GAMES_CSV_HEADER, GAMES_CSV_HEADER_LEGACY } from './src/lib/games.js';
+import { loadInvitesFile } from './src/lib/invites.js';
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -575,7 +577,11 @@ async function test() {
 
   if (e1s) e1.emit('auth', e1s, null);
   if (e2s) e2.emit('auth', e2s, null);
-  await sleep(500);
+  // T33 hardening: the old code slept 500 ms then checked em1/em2 — under the
+  // parallel-load runner the startGame emission can lag that much, leaving
+  // em1 null and cascading failures (m1=null) into the T31 CSV rows. Wait for
+  // both seats to report the match id instead.
+  await waitFor(() => em1 !== null && em2 !== null && em1 === em2, 5000);
 
   if (em1 !== null && em1 === em2) {
     // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
@@ -585,6 +591,7 @@ async function test() {
       (i % 2 === 0 ? e1 : e2).emit('move', em1, { x: fx, y: fy }, { x: tx, y: ty });
       await sleep(200);
     }
+    await waitFor(() => e1End && e2End, 5000);
     if (e1End && e2End) pass('F2: rated match ended (checkmate)');
     else fail('F2: rated match ended', `e1=${JSON.stringify(e1End)} e2=${JSON.stringify(e2End)}`);
   } else {
@@ -642,9 +649,12 @@ async function test() {
   r2.on('replay', m => { rReplay2 = m; });
   r1.emit('auth', null, null);
   r2.emit('auth', null, null);
-  // hardened 500 -> 1200 (same load-flake class as the guest seating wait:
-  // parallel headless e2e inflates the seat round-trip -> rMatch stays null).
-  await sleep(1200);
+  // T33 hardening: replace the fixed 1200 ms sleep (itself a load-flake
+  // mitigation — parallel headless e2e inflates the seat round-trip and
+  // rMatch stayed null) with a waitFor on the seating itself: deterministic
+  // when the event arrives early, and tolerant of a slow server loop when it
+  // does not.
+  await waitFor(() => rMatch !== null, 5000);
 
   if (rMatch !== null) {
     // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
@@ -794,23 +804,30 @@ async function test() {
     Promise.race([new Promise(r => b4w.on('connect', r)), sleep(3000)]),
     Promise.race([new Promise(r => b4b.on('connect', r)), sleep(3000)])
   ]);
-  let b4Match = null, b4wColor = null, b4bColor = null, b4wValid = 0, b4bValid = 0;
+  let b4Match = null, b4wColor = null, b4bColor = null, b4wValid = 0, b4bValid = 0, b4MoveApplied = false;
   b4w.on('startGame', (c, m) => { b4wColor = c; if (b4Match === null) b4Match = m; });
   b4b.on('startGame', (c, m) => { b4bColor = c; if (b4Match === null) b4Match = m; });
-  b4w.on('validated', () => { b4wValid++; });
-  b4b.on('validated', () => { b4bValid++; });
+  b4w.on('validated', (board, turn, extra) => { b4wValid++; if (!(extra && extra.rejected)) b4MoveApplied = true; });
+  b4b.on('validated', (board, turn, extra) => { b4bValid++; if (!(extra && extra.rejected)) b4MoveApplied = true; });
   b4w.emit('auth', null, null);
   b4b.emit('auth', null, null);
   await sleep(500);
   if (b4Match !== null) {
     // One move by white (e2-e4) so moveHistory.length = 1.
+    // T33 hardening: wait for the move to be APPLIED (a 'validated' echo on the
+    // mover) instead of a blind 300 ms — under the parallel-load runner the
+    // move event can lag and the disconnect below used to race it (F5 row
+    // flakes: the F5 pre-start gate saw moveHistory.length=0).
     const wMoveFirst = b4wColor === 0;
     if (wMoveFirst) {
       b4w.emit('move', b4Match, { x: 4, y: 6 }, { x: 4, y: 4 });
     } else {
       b4w.emit('move', b4Match, { x: 4, y: 1 }, { x: 4, y: 3 });
     }
-    await sleep(300);
+    await waitFor(() => b4MoveApplied, 3000);
+    await sleep(150); // let the server finish the disconnect bookkeeping before
+    // the F5 race window below (the echo above only proves the MOVE was
+    // applied, not that the next event's dispatch slot is free under load)
     const oldWId = b4w.id; // socket.io id BEFORE disconnect (the F5 race case)
     b4w.disconnect();
     await sleep(100);
@@ -1219,9 +1236,12 @@ async function test() {
     ivAsock.emit('auth', ivAs, null);
     await sleep(300);
 
-    // Failure reasons (contract §2): guest -> auth; method rapid -> method-na;
-    // unknown target -> no-user; self -> self. Each must emit invite:failed
-    // with exactly {reason}, and NO invite:created.
+    // Failure reasons (contract §2): guest -> auth; bad method -> method-na
+    // (T33 note: 'rapid' became a VALID method in contract 36, so the
+    // bad-method case now uses 'blitz'; T33 re-asserts both 'rapid' accepted
+    // and 'blitz' rejected, including on unauthenticated sockets); unknown
+    // target -> no-user; self -> self. Each must emit invite:failed with
+    // exactly {reason}, and NO invite:created.
     const ivAFailed = [];
     const ivACreated = [];
     ivAsock.on('invite:failed', d => ivAFailed.push(d));
@@ -1230,8 +1250,8 @@ async function test() {
     // 1) unauthenticated guest
     ivGsock.emit('invite:create', { targetUsername: ivB, method: 'standard' });
     await sleep(200);
-    // 2) bad method (authenticated)
-    ivAsock.emit('invite:create', { targetUsername: ivB, method: 'rapid' });
+    // 2) bad method (authenticated) — 'blitz' after T33 (was 'rapid')
+    ivAsock.emit('invite:create', { targetUsername: ivB, method: 'blitz' });
     await sleep(200);
     // 3) unknown user
     ivAsock.emit('invite:create', { targetUsername: 'nobody_x9', method: 'standard' });
@@ -1433,6 +1453,288 @@ async function test() {
     ivAsock.disconnect(); ivBsock.disconnect(); ivCsock.disconnect(); ivGsock.disconnect();
   }
 
+  // === T33 (contract 36): users directory, public profiles, method picker (server) ===
+  // SELF-CONTAINED: this section uses its own two users (t33u1/t33u2) so it does
+  // not depend on the T31 invite trio (ivA/ivB are block-scoped const and out of
+  // scope here). It runs after T31, so the suite state (a few 1516 users from
+  // F2/T1 + the rest at 1500) already exists.
+  {
+    // Two NEW users (adjacent names, equal 1500 elo) with ONE SOCKET PER USER
+    // (the T31 pattern): a 'signin' response carries no username, so two signins
+    // on ONE socket can cross under the parallel-load runner and a "kept" id can
+    // silently belong to the other user. Per-user sockets make each socket's
+    // responses unambiguous. The kept session ids are then used both for the
+    // explicit-'auth' joins in (5) and as handshake cookies in T33b — a session
+    // id is a plain id->user lookup (validateSession) and is not consumed by
+    // 'auth', so sockets may share one (T32 does this too).
+    const t33u1 = 't33u1_' + Math.random().toString(36).slice(2, 7);
+    const t33u2 = 't33u2_' + Math.random().toString(36).slice(2, 7);
+    const t33su1 = io(BASE, { transports: ['websocket'] });
+    const t33su2 = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => t33su1.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => t33su2.on('connect', r)), sleep(3000)])
+    ]);
+    t33su1.emit('signup', { username: t33u1, password: 't33pw' });
+    await sleep(100);
+    t33su2.emit('signup', { username: t33u2, password: 't33pw' });
+    await sleep(100);
+    const t33s1 = await signinWithRetry(t33su1, t33u1, 't33pw');
+    const t33s2 = await signinWithRetry(t33su2, t33u2, 't33pw');
+    if (!t33s1 || !t33s2) fail('T33 setup: signins', `s1=${!!t33s1} s2=${!!t33s2}`);
+
+    // (1) /api/users/stats: shape for ALL registered users + order invariants
+    //     (elo non-increasing; username ascending within each equal-elo group).
+    //     The new pair must be adjacent and in NAME order inside its equal-elo
+    //     group — that is the name-ASC tie-break this route must apply. Exact rank
+    //     positions are NOT asserted (the suite has 1516 users above them); the
+    //     global elo-desc / name-asc invariants are.
+    let stats = null, statsStatus = null, statsErr = '';
+    try {
+      const r = await fetch(BASE + '/api/users/stats');
+      statsStatus = r.status;
+      stats = await r.json();
+    } catch (e) { statsErr = String(e); }
+    if (statsStatus === 200 && Array.isArray(stats) && stats.length === loadUsersFile(USERS_CSV).length) {
+      const okShape = stats.every(x => typeof x.username === 'string' && typeof x.elo === 'number' && typeof x.games === 'number');
+      const orderOk = okShape && stats.every((x, i) =>
+        i === 0 || stats[i - 1].elo > x.elo || (stats[i - 1].elo === x.elo && stats[i - 1].username < x.username));
+      const iU1 = stats.findIndex(x => x.username === t33u1);
+      const iU2 = stats.findIndex(x => x.username === t33u2);
+      const pairOk = iU1 >= 0 && iU2 === iU1 + 1 && t33u1 < t33u2 &&
+        stats[iU1].elo === stats[iU2].elo && stats[iU1].elo === 1500;
+      if (orderOk && pairOk)
+        pass('T33: /api/users/stats — [{username, elo, games}] for ALL users; ordered elo desc then name asc (new 1500 pair adjacent in name order)');
+      else
+        fail('T33: /api/users/stats shape/order', `orderOk=${orderOk} pairOk=${pairOk} ${JSON.stringify(stats && stats.slice(0, 6))}`);
+    } else {
+      fail('T33: /api/users/stats', `status=${statsStatus} n=${stats && stats.length} ${statsErr}`);
+    }
+
+    // (2) GET /users: 200, the users table skeleton (Имя | Elo | Игр) and the new
+    //     users listed (the page is public — no cookie sent).
+    let usersHtml = null, usersStatus = null, usersErr = '';
+    try {
+      const r = await fetch(BASE + '/users');
+      usersStatus = r.status;
+      usersHtml = await r.text();
+    } catch (e) { usersErr = String(e); }
+    if (usersStatus === 200 && usersHtml &&
+        usersHtml.includes('Имя') && usersHtml.includes('Elo') && usersHtml.includes('Игр') &&
+        usersHtml.includes(t33u1) && usersHtml.includes(t33u2) &&
+        usersHtml.indexOf(t33u1) < usersHtml.indexOf(t33u2))
+      pass('T33: GET /users -> 200, users table (Имя | Elo | Игр), new users listed in name order');
+    else
+      fail('T33: GET /users', `status=${usersStatus} ${usersErr}`);
+
+    // (3) GET /user?name=<unknown> -> 404 with a short Russian message.
+    let u404 = null, u404Status = null, u404Err = '';
+    try {
+      const r = await fetch(BASE + '/user?name=t33nobody_' + Date.now());
+      u404Status = r.status;
+      u404 = await r.text();
+    } catch (e) { u404Err = String(e); }
+    if (u404Status === 404 && u404 && u404.includes('Пользователь не найден'))
+      pass('T33: GET /user?name=<unknown> -> 404 «Пользователь не найден»');
+    else
+      fail('T33: GET /user unknown 404', `status=${u404Status} ${u404Err}`);
+
+    // (3a) GET /user?name=<known> before any game -> 200, name+elo present, no rows.
+    let prof0 = null, prof0Status = null, prof0Err = '';
+    try {
+      const r = await fetch(BASE + '/user?name=' + t33u1);
+      prof0Status = r.status;
+      prof0 = await r.text();
+    } catch (e) { prof0Err = String(e); }
+    if (prof0Status === 200 && prof0 && prof0.includes(t33u1) && prof0.includes('1500') &&
+        (prof0.includes('Партий пока нет') || /colspan/.test(prof0)))
+      pass('T33: GET /user?name=<known> (no games yet) -> 200, name + elo, empty table');
+    else
+      fail('T33: GET /user known (empty)', `status=${prof0Status} ${prof0Err}`);
+
+    // (3b) GET /api/users/:name/games — raw rows JSON, newest first, per-view
+    //     result + method label. Before any game: 200 with an empty array.
+    let profGames0 = null, profGames0Status = null, profGames0Err = '';
+    try {
+      const r = await fetch(BASE + '/api/users/' + t33u1 + '/games');
+      profGames0Status = r.status;
+      profGames0 = await r.json();
+    } catch (e) { profGames0Err = String(e); }
+    if (profGames0Status === 200 && Array.isArray(profGames0) && profGames0.length === 0)
+      pass('T33: GET /api/users/:name/games (no games yet) -> 200 []');
+    else
+      fail('T33: /api/users/:name/games (empty)', `status=${profGames0Status} ${JSON.stringify(profGames0)} ${profGames0Err}`);
+
+    // (5) invite:create method 'rapid' (accepted) — lands in invites.json, the
+    //     invite-bound match (match.method) and games.csv (10th column) end-to-end.
+    //     t33u1 (inviter) invites t33u2 (target). The inviter's socket must have
+    //     socket.data.user set before it can both create the invite and pass the
+    //     invite-bound join rule (socket.data.user must be invite.from/to), so it
+    //     emits 'auth' first (the same event the production game page fires on
+    //     load) — matching the T31 two-auth pattern. Seating: the inviter joins
+    //     the invite match FIRST -> WHITE (host), the target joins SECOND -> BLACK;
+    //     the target resigns (black) -> a white-win with white=t33u1, black=t33u2.
+    t33su1.emit('auth', t33s1, null);           // set socket.data.user = t33u1 (host of an idle public match)
+    await sleep(400);
+    let t33Inv = null, t33EndA = null, t33EndB = null;
+    t33su1.on('invite:created', (x) => { t33Inv = x && x.matchId; });
+    t33su1.on('gameEnd', (d) => { t33EndA = d; });
+    const t33r = io(BASE, { transports: ['websocket'], extraHeaders: { cookie: 'sessionID=' + t33s2 } });
+    await Promise.race([new Promise(r => t33r.on('connect', r)), sleep(3000)]);
+    t33r.on('gameEnd', (d) => { t33EndB = d; });
+    t33su1.emit('invite:create', { targetUsername: t33u2, method: 'rapid' });
+    await waitFor(() => t33Inv !== null, 3000);
+    let inviteRow = null;
+    for (const f of [t33u1, t33u2]) {
+      const recs = loadInvitesFile().filter(i => i && i.to === f && i.matchId === t33Inv);
+      if (recs.length) { inviteRow = recs[0]; break; }
+    }
+    if (t33Inv && inviteRow && inviteRow.method === 'rapid' && inviteRow.from === t33u1 && inviteRow.to === t33u2)
+      pass('T33: invite method rapid accepted — stored in invites.json with method=rapid');
+    else
+      fail('T33: invite rapid in invites.json', JSON.stringify(inviteRow));
+
+    // match.method end-to-end: inviter (t33u1) joins first -> WHITE (host); the
+    // target (t33u2) joins second -> BLACK; the target resigns (black).
+    t33su1.emit('auth', t33s1, t33Inv);          // t33u1 = inviter -> WHITE (first seat in the invite match)
+    await sleep(500);
+    t33r.emit('auth', t33s2, t33Inv);             // t33u2 = target -> BLACK (second seat)
+    await sleep(500);
+    t33r.emit('resign', t33Inv);                  // t33u2 (black) resigns -> white-win
+    await waitFor(() => t33EndA && t33EndB, 5000);
+    await sleep(200);
+    const rapidRows = loadGames().filter(g => (g.white === t33u1 && g.black === t33u2) && g.method === 'rapid');
+    const rapidRow = rapidRows[rapidRows.length - 1];
+    const rapidOk = !!rapidRow && rapidRow.result === 'white-win' && rapidRow.reason === 'resign' &&
+      rapidRow.white === t33u1 && rapidRow.black === t33u2;
+    const endPayloadsOk = t33EndA && t33EndB && t33EndA.method === 'rapid' && t33EndB.method === 'rapid';
+    let csvRawOk = false;
+    try {
+      const raw = fs.readFileSync(GAMES_CSV, 'utf8').split('\n').filter(l => l.trim());
+      const headerOk = raw[0] === GAMES_CSV_HEADER;
+      const rowOk = raw.some(l => l.includes(',') && l.split(',')[9] === 'rapid' && l.split(',')[1] === t33u1 && l.split(',')[2] === t33u2);
+      csvRawOk = headerOk && rowOk;
+    } catch (e) { csvRawOk = false; }
+    if (rapidOk && endPayloadsOk && csvRawOk)
+      pass('T33: rapid method lands in match + games.csv (10th column) + gameEnd payload {…, method:"rapid"}');
+    else
+      fail('T33: rapid end-to-end', `row=${JSON.stringify(rapidRow)} end=${JSON.stringify(t33EndA)}/${JSON.stringify(t33EndB)} csv=${csvRawOk}`);
+
+    // (3c) AFTER the rapid game: the profile page + raw JSON for t33u1 (the WHITE
+    //     side, who WON) must show exactly one row — opponent t33u2, per-view
+    //     «Победа», method label «Рапид» (newest-first trivial with one row).
+    let prof1 = null, prof1Status = null, prof1Err = '';
+    try {
+      const r = await fetch(BASE + '/user?name=' + t33u1);
+      prof1Status = r.status;
+      prof1 = await r.text();
+    } catch (e) { prof1Err = String(e); }
+    if (prof1Status === 200 && prof1 && prof1.includes(t33u2) &&
+        (prof1.includes('Победа') || /result-win/.test(prof1)) && prof1.includes('Рапид'))
+      pass('T33: GET /user?name=<known> -> 200 + row (opponent, per-view «Победа», method «Рапид»)');
+    else
+      fail('T33: GET /user known (with game)', `status=${prof1Status} ${prof1Err}`);
+
+    let profGames1 = null, profGames1Status = null, profGames1Err = '';
+    try {
+      const r = await fetch(BASE + '/api/users/' + t33u1 + '/games');
+      profGames1Status = r.status;
+      profGames1 = await r.json();
+    } catch (e) { profGames1Err = String(e); }
+    if (profGames1Status === 200 && Array.isArray(profGames1) && profGames1.length === 1 &&
+        profGames1[0].opponent === t33u2 && profGames1[0].result === 'win' && profGames1[0].method === 'Рапид' &&
+        typeof profGames1[0].date === 'string')
+      pass('T33: GET /api/users/:name/games — ' + profGames1.length + ' row(s) {date, opponent, result, method}, newest first');
+    else
+      fail('T33: /api/users/:name/games', `status=${profGames1Status} ${JSON.stringify(profGames1 && profGames1[0])} ${profGames1Err}`);
+
+    // (6) legacy CSV (9 columns, no method) loads with method defaulted to 'standard'
+    {
+      const legacy = GAMES_CSV_HEADER_LEGACY + '\n' +
+        new Date().toISOString() + ',t33lu1,t33lu2,white-win,resign,1500,1516,1500,1484\n' +
+        new Date().toISOString() + ',t33lu1,-,black-win,resign,1500,1516,0,0\n';
+      const tmp = path.join(fs.mkdtempSync(new URL('..', import.meta.url).pathname + 't33-legacy-'), 'games.csv');
+      fs.writeFileSync(tmp, legacy);
+      const parsed = loadGames(tmp);
+      if (parsed.length === 2 && parsed.every(g => g.method === 'standard') && parsed[0].white === 't33lu1' && parsed[0].black === 't33lu2' && parsed[1].white === 't33lu1' && parsed[1].black === null)
+        pass('T33: legacy games.csv (9 columns, no method) loads with method defaulted to "standard"');
+      else
+        fail('T33: legacy CSV -> standard', JSON.stringify(parsed));
+    }
+
+    // (7) final state: users.csv (rewritten atomically by the server on each signup)
+    //     must contain the new pair, and games.csv must carry the rapid row alongside
+    //     the legacy-standard rows (10th column).
+    {
+      const all = loadGames();
+      const csvUsers = loadUsersFile(USERS_CSV).map(u => u.username);
+      const t33Ok = all.some(g => g.method === 'rapid' && g.white === t33u1 && g.black === t33u2) &&
+        csvUsers.includes(t33u1) && csvUsers.includes(t33u2);
+      if (t33Ok)
+        pass('T33: final state — users.csv has the new pair; games.csv rapid row (method column) alongside standard rows');
+      else
+        fail('T33: final state', `users=${JSON.stringify(csvUsers)} games=${JSON.stringify(all.map(g => [g.white, g.black, g.method]))}`);
+    }
+
+    // === T33b (contract 36, point 1): unauthenticated-directory-socket flows ===
+    // The /users page socket NEVER emits 'auth' — only the handshake cookie.
+    // Uses the SAME kept session ids (t33s1/t33s2) as cookies on FRESH sockets —
+    // the sessions are still valid (a session id is a plain id->user lookup;
+    // 'auth' does not consume it).
+    // (1) cookie-resolved invite:create {method:'standard'} must succeed
+    //     (invite:created) and be stored with the chosen method;
+    // (2) method 'blitz' must fail with invite:failed {reason:'method-na'} on the
+    //     same unauthenticated socket (T31 asserted 'blitz' only on an
+    //     authenticated game-page socket);
+    // (3) the TARGET's own unauthenticated (lobby-style) socket must receive the
+    //     live invite via invites:list on the cookie-resolved path.
+    {
+      const dirSocket = io(BASE, { transports: ['websocket'], extraHeaders: { cookie: 'sessionID=' + t33s1 } });
+      await Promise.race([new Promise(r => dirSocket.on('connect', r)), sleep(3000)]);
+      let t33bInv = null;
+      let blitzFailed = null, stdFailed = null;
+      dirSocket.on('invite:created', (x) => { t33bInv = x && x.matchId; });
+      dirSocket.on('invite:failed', (x) => { blitzFailed = x && x.reason; stdFailed = x && x.reason; });
+      // (2) first: 'blitz' -> method-na. Capture it in blitzFailed BEFORE the
+      // standard attempt (the failed-listener writes to both, so the blitz
+      // result is read immediately after its emit).
+      dirSocket.emit('invite:create', { targetUsername: t33u2, method: 'blitz' });
+      await waitFor(() => blitzFailed !== null, 3000);
+      const blitzWasMethodNa = blitzFailed === 'method-na';
+      // (1) then: 'standard' -> created (reset the failed capture so a spurious
+      // standard failure is what stdFailed reflects).
+      blitzFailed = null; stdFailed = null;
+      dirSocket.emit('invite:create', { targetUsername: t33u2, method: 'standard' });
+      await waitFor(() => t33bInv !== null, 3000);
+      let stored = null;
+      for (const f of [t33u1, t33u2]) {
+        const recs = loadInvitesFile().filter(i => i && i.to === f && i.matchId === t33bInv);
+        if (recs.length) { stored = recs[0]; break; }
+      }
+      if (blitzWasMethodNa)
+        pass(`T33b: invite:create on an UNAUTHENTICATED socket (no auth, handshake cookie only) — blitz -> invite:failed {reason:method-na}`);
+      else
+        fail('T33b: blitz -> method-na', `failed=${blitzFailed} created=${t33bInv}`);
+      if (t33bInv && stored && stored.method === 'standard' && stored.from === t33u1)
+        pass(`T33b: cookie-resolved invite:create {method:standard} -> invite:created, stored record {from, method:standard, matchId}`);
+      else
+        fail('T33b: cookie-resolved invite:create', `created=${t33bInv} stored=${JSON.stringify(stored)} stdFailed=${stdFailed}`);
+      // (3) The target's own LOBBY-STYLE socket (unauthenticated, cookie only)
+      //     must see the live invite via invites:list on the cookie path.
+      const lobbyB2 = io(BASE, { transports: ['polling'], extraHeaders: { cookie: 'sessionID=' + t33s2 } });
+      let b2Invites = null;
+      lobbyB2.on('invites', (p) => { b2Invites = p; });
+      if (lobbyB2.connected) lobbyB2.emit('invites:list');
+      else await new Promise(r => lobbyB2.on('connect', () => { lobbyB2.emit('invites:list'); r(); }));
+      const gotIt = await waitFor(() => Array.isArray(b2Invites) && b2Invites.some(i => i.from === t33u1 && i.matchId === t33bInv), 5000);
+      if (gotIt)
+        pass(`T33b: target's unauthenticated socket (cookie only) receives the live invite via invites:list`);
+      else
+        fail('T33b: target cookie-fallback invites:list', JSON.stringify(b2Invites));
+      dirSocket.disconnect(); lobbyB2.close();
+    }
+    t33su1.disconnect(); t33su2.disconnect(); t33r.disconnect();
+  }
   // === T32 (orchestrator integration fixes, contract 32 browser smoke) ===
   // (1) invites:list on an UNAUTHENTICATED lobby socket must resolve the user
   //     from the handshake cookie — the LOBBY never emits 'auth' (only the game
@@ -1524,6 +1826,7 @@ async function test() {
       fail('T32: pre-start CSV gate', `rows ${rowsBefore} -> ${rowsAfter}`);
     sc.close(); sd.close();
   }
+
 
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;
