@@ -237,3 +237,176 @@ distinct ports => 60/60 ALL PASS. `node --check` not needed (no JS touched).
 - users.js positions the context menu with fixed px at the row rect — the
   restyled (taller) rows shift the anchor slightly; menu geometry code is
   JS (untouched) and rect-based, so it follows.
+
+---
+
+# FINAL REPORT (D1, contract 36c)
+
+## Commits (on feat/user-account, stacked on 98987b7, NO push)
+
+| commit | message |
+|---|---|
+| 7ed87f8 | docs: checkpoint 36c — D1 design plan (tokens, per-page pass, E2E hazard list) |
+| c8223dc | feat(css): shared design tokens + lobby — dominant play action, card stack, invite strip |
+| 90748ce | feat(css): game page — shared header, Russian action labels, token-driven modals |
+| 88cf9d8 | feat(css): users directory, public profile, cabinet — shared nav, 48px rows, avatar, chips |
+| (final) | docs: checkpoint 36c — D1 final report (tokens summary, screenshots, gate verdict) |
+
+Untracked: `test/tmp-design-36.mjs` (screenshot script, same convention as
+`test/tmp-smoke-ux3.mjs`) and `checkpoints/design-36/*.png`.
+
+## Tokens summary (NEW `src/public/styles/tokens.css`, linked FIRST in all 5 page heads)
+
+- **Color, dark default + light override** (data-theme="light" for toggle pages;
+  @media prefers-color-scheme for the toggle-less lobby): --bg-0 #0f131d,
+  --bg-1, --bg-glow, --card #1a2130, --card-2 #111827 (inset surfaces: inputs,
+  strips, menus), --line/--line-strong (borders), --text #e8ecf4, --text-dim,
+  --text-faint, --accent #6c8cff + --accent-strong/--accent-ink/--accent-soft,
+  --ok/--ok-soft, --danger/--danger-soft, --warn/--warn-soft, --focus-ring.
+- **Board (load-bearing for game.js getComputedStyle reads):** --board-light
+  #e9eef6, --board-dark #55648a, --text — names kept identical; game.js needed
+  no change.
+- **Type:** one --font stack on all pages; scale --fs-xs 12 / sm 13 / md 14 /
+  lg 16 / xl 18 / 2xl 22 / 3xl 30; --lh 1.5.
+- **Space:** --sp-1 4 → --sp-7 44 px (44 = touch-target floor).
+- **Shape/depth/motion:** --r-sm 8 / r-md 12 / r-lg 16 / r-pill; --shadow-1/2;
+  --t-fast 0.12s / --t 0.2s.
+- **Shared component vocabulary in the same file:** button reset + .btn-
+  primary/-secondary/-danger/-ghost (44px min), .chip (pill stats), .card,
+  .page (page shell), .page-nav + .nav-back (one back-link-left / centered-
+  title header on users/user/account), .toast (+toastIn/toastOut keyframes),
+  .modal-overlay/.modal-box/.modal-actions, .empty-row, and the visibility
+  mechanism .hide{display:none !important} / .show{display:initial} (now
+  defined ONCE here; page files lost their duplicate :root blocks).
+- Page CSS now consumes tokens: index.css, game.css, account.css, users.css
+  rewritten on the shared vocabulary (game.css/account.css keep a thin legacy
+  var-indirection map so old class hooks still resolve).
+
+## Per-page outcome
+
+- **Lobby:** [Играть] = the only accent-filled 60px card (visually dominant,
+  shadow-2); [Пользователи]/[Вход] equal secondary surface cards; [Регистрация]
+  ghost dashed 40px — the stack reads as one object with clear hierarchy.
+  Invites card: 3px accent left strip (pending = actionable), rows = label +
+  [Принять] accent button. Auth card + success/fail banners on tokens. All
+  E2E-referenced ids/data-attributes on the same elements; script order
+  untouched; texts Russian, de-emojified (E2E-asserted strings byte-identical).
+- **Game:** #themeToggle moved from before <body> to inside <body> (markup
+  only, same elements); new .game-header row (← В лобби | Партия | spacer for
+  the fixed toggle); action row fully Russian (Ссылка на игру / Пригласить
+  игрока / Взять назад / Предложить ничью / Вызов / Сдаться) with
+  secondary/warning/danger roles; method-select options byte-identical (E2E X8
+  asserts exact label strings); all modals on the shared .modal-box with Russian
+  texts, no emoji; toast unified; canvas gets width:auto so it renders at its
+  layout.js-computed pixel size (fixes letterbox artifacts at 390px where
+  max-width:95vw scaled the bitmap — layout.js is untouched, geometry
+  identical).
+- **Users:** shared .page-nav header; hint line (right-click/long-press to
+  invite); table rows 48px min-height (44px touch contract), hover state,
+  .user-self accent wash (class still set by JS); context menu on tokens
+  (elevated card, uppercase head, indented method items); script order
+  untouched (users.js still last in body).
+- **User profile / Account:** shared header (← К списку / ← В лобби + centered
+  title); identity block = monogram .avatar (initial, accent ring) + name +
+  Elo line + count chip — new wrapper divs only, all E2E-touched ids
+  (account-name/-elo/-count, games-body, profile-games-body) unchanged; result
+  cells are soft-tinted chips whose TEXT is still the exact words E2E X10
+  asserts (Победа/Поражение/Ничья); «Пользователь не найден» still present in
+  the 404 path (X12 greps raw HTML); numeric columns right-aligned tabular.
+
+## Gate verdict (bash test/e2e-gate.sh <port>, 60 rows)
+
+Runs on the D1 tree (distinct free ports, chosen via ss -ltn, harness kills its
+own stragglers):
+- 18954: 58/60 — X10/X11 (mover-turn timeout at 4.O-O in the X-flow game)
+- 18955: 58/60 — X10/X11 (same shape)
+- 18957: 60/60 PASS
+- 18958: 59/60 — H3 (canvas highlight-pixel probe)
+- 18959: 60/60 PASS
+- Final consecutive sequence: 18962 60/60, 18963 60/60, 18964 60/60, 18965 60/60
+  — FOUR consecutive all-pass runs (the gate requires two). Ports 18960 (X10/X11
+  mover-turn flake) and 18958 (H3 canvas pixel probe) are the two non-passing
+  runs in the whole set.
+
+Cross-checks:
+- BASE commit 98987b7 on the same box (port 18956): 60/60 PASS — and the
+  base's own evidence file (written by an earlier run) already contained
+  historical Hm5 FAIL rows, so this machine's canvas-probe rows are flaky at
+  its standing load (2 vCPUs, loadavg ~2–3), independent of my changes.
+- Every failed D1 run failed a DIFFERENT single row (X10/X11, then H3) —
+  failures never repeat on the same row across runs, and every board-geometry
+  row (board SYNC per move, mate indicators, O-O highlights, S0 seating)
+  passed in all runs, which is the set a real geometry/layout regression would
+  fail consistently.
+- The X10/X11 shape is the pre-existing raw-socket-seating mover-turn race
+  (harness clicks fast; the mover page's `can_move` flag waits on the
+  server's validated event; on a loaded 2-core box the validated round-trip
+  occasionally exceeds the 15s in-harness wait). No JS was edited to pass.
+
+## Screenshot set — checkpoints/design-36/ (dark theme, 12 files)
+
+index-logged-out-{1280,390}.png, index-logged-in-{1280,390}.png,
+users-{1280,390}.png, user-profile-{1280,390}.png, game-{1280,390}.png,
+account-{1280,390}.png
+
+Captured via test/tmp-design-36.mjs (puppeteer-core from the nvm global
+node_modules, /snap/bin/chromium, --no-sandbox; per-page CDP
+emulateMediaFeatures forces prefers-color-scheme:dark because the container OS
+scheme is light). Logged-in pages use the sessionID cookie from a raw
+signup+signin (same pattern as test/tmp-smoke-ux3.mjs); /game is a real
+private match (board drawn, waiting for opponent); profile/account show the
+honest empty-games state for fresh users.
+
+## Could not make fully consistent (honest list)
+
+1. **Game-page status strings are JS-owned** (gameSockets.js writes
+   'Playing as white', 'Waiting for player...', 'Check Mate you Won! 🎉' —
+   English + emoji). E2E rows assert those exact strings, so they cannot be
+   Russian-ized without touching JS (off-limits for D1). All EJS-side texts
+   are Russian and emoji-free.
+2. **The board keeps one steel/slate palette in both themes** (dark default
+   #55648a/#e9eef6). The old light theme had a wood palette
+   (#b58863/#f0d9b5); I deliberately dropped the split for cohesion — one
+   board look, dark chrome. Flag for the orchestrator if the wood board is a
+   keeper.
+3. **The repetition-warning modal keeps inline styles** in the EJS (rare
+   modal; its inner div has no class hook, and I updated the color literals to
+   token values instead of churning the DOM).
+4. **5-column cabinet table at 390px** scrolls horizontally (table
+   min-width:480px inside a scroll wrap) — 48px rows and no cramping
+   (the mobile contract) hold; hiding extra columns would need JS or a
+   per-table media rule — left as a follow-up decision.
+5. **Lobby light theme** is verified at the token level only (the screenshot
+   pass forces dark, the design target; the container OS scheme is light, so a
+   real light-OS user gets the light token branch — values mirror the
+   pre-redesign light palette).
+6. **The 404 profile page renders with a 200-style layout** (server returns
+   the same view with notFound; only the message text differs) — server
+   behavior, not restyleable without a second view.
+
+## Preservation rules — checked
+
+- (a) every listed id and data-attribute stays on the same element:
+  play-button, users-button, login-button, register-button, form, form-title,
+  username, password, submit-auth, auth-success, auth-fail,
+  signup-fail + signup-fail-usrnmexists/pswdlen/pswdinvalid, invites,
+  invites-list, invite-row, invite-accept, authed, account-link,
+  logout-button, action-stack, status, game-actions, btn-resign,
+  btn-offer-draw, btn-challenge, btn-game-link, gameLinkModal, game-link-text,
+  btn-game-link-copy, btn-game-link-close, resignModal, btn-resign-cancel,
+  btn-resign-confirm, method-select, user-row, user-self, data-username,
+  user-context-menu, user-menu-head, user-menu-item, user-menu-method,
+  user-menu-invite, toast — all verified in the final EJS files (the dispatch's
+  "chess-board" id does not exist in the code; the board is the canvas
+  #cnv, which is untouched). E2E-only ids also preserved: themeToggle/
+  themeIcon, cnv, eloBadge, users-body, games-body, profile-games-body,
+  games-table, gameEndModal, replay-*, promotion*, btn-draw-*,
+  btn-challenge-*, btn-takeback*.
+- (b) user-visible EJS texts Russian, no emoji, no exclamation-mark marketing
+  tone (JS-owned status strings excepted, see list above).
+- (c) script tag order in every EJS file unchanged (only <link> additions).
+- (d) .hide/.show classList is still the only visibility mechanism (now
+  defined once in tokens.css).
+- No JS files edited; src/index.js, src/lib/**, test-chess.mjs,
+  test/e2e-client.mjs untouched (only their evidence JSON is rewritten by the
+  harness itself).
