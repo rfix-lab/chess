@@ -1,9 +1,10 @@
-/* === Lobby page — modern clean look ===
+/* === Lobby page — modern clean look (contract 32 redesign) ===
    Self-contained: no JS dependency. Adapts to the OS colour scheme and,
    when present, to a data-theme attribute on <html> (game-theme parity).
    JS-referenced ids/classes kept exactly (indexSockets.js / events.js):
-   form, username, username-list, password, play-button (x2), generated-link,
-   auth-success, auth-fail, signup-fail(-*), .hide, .show */
+   form, form-title, submit-auth, username, username-list, password,
+   play-button, auth-success, auth-fail, signup-fail(-*), invites,
+   invites-list, authed, account-link, logout-button, .hide, .show */
 
 :root {
   --bg-0: #0f1420;
@@ -81,17 +82,7 @@ body {
   transition: background 0.3s, color 0.3s;
 }
 
-/* --- Lobby card --- */
-#form {
-  display: block;
-  width: min(92vw, 420px);
-  background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 28px 26px 26px;
-}
-
+/* --- Brand header --- */
 .brand {
   text-align: center;
   margin: 0 0 6px;
@@ -110,8 +101,89 @@ body {
   font-size: 14px;
 }
 
+/* --- Big action stack (contract 32) ---
+   [Вход] and [Играть] each >= 56px; [Регистрация] same width, ~40px.
+   All same width so the stack reads as one column of equal cards. */
+.action-stack {
+  width: min(92vw, 420px);
+  margin: 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.big-btn {
+  width: 100%;
+  height: 60px;               /* >= 56px */
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+  border-radius: var(--radius);
+  transition: transform 0.08s, background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+#login-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+#login-button:hover { background: var(--accent-hover); }
+
+#play-button {
+  background: var(--card);
+}
+#play-button:hover {
+  background: var(--input-bg);
+  border-color: var(--input-focus);
+}
+
+.big-btn:active {
+  transform: translateY(1px);
+}
+
+/* [Регистрация] — same width, shorter (~40px), quieter style */
+.mid-btn {
+  width: 100%;
+  height: 40px;
+  background: transparent;
+  border: 1px dashed var(--card-border);
+  border-radius: 12px;
+  color: var(--text-dim);
+  font-size: 15px;
+  font-weight: 600;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.mid-btn:hover {
+  color: var(--text);
+  border-color: var(--input-focus);
+  background: var(--input-bg);
+}
+.mid-btn:active {
+  transform: translateY(1px);
+}
+
+/* --- Auth card (login / registration form) --- */
+.auth-card {
+  width: min(92vw, 420px);
+  margin: 14px 0;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px 26px 24px;
+}
+
+.auth-card h2 {
+  margin: 0 0 6px 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
 .field {
-  margin-top: 16px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -146,7 +218,7 @@ body {
   margin-top: 18px;
 }
 
-/* --- Buttons --- */
+/* --- Generic buttons (auth card) --- */
 button {
   font-family: inherit;
   cursor: pointer;
@@ -183,32 +255,102 @@ button:active {
   border-color: var(--input-focus);
 }
 
-/* Guest row below the card */
-.guest {
+/* --- Invites section (contract 32 §3) --- */
+.invites {
   width: min(92vw, 420px);
-  margin: 18px 0 0;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.guest button {
-  flex: 1 1 auto;
-}
-
-#generated-link {
-  display: inline-flex;
-  align-items: center;
-  width: 100%;
-  word-break: break-all;
-  text-align: center;
-  padding: 11px 14px;
-  color: var(--accent);
+  margin: 12px 0;
   background: var(--card);
   border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 18px 22px 18px;
+  box-shadow: var(--shadow);
+}
+
+.invites h2 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+#invites-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.invite-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
-  font-size: 13px;
+}
+
+.invite-label {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.invite-accept {
+  flex-shrink: 0;
   text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent);
+  padding: 7px 16px;
+  border-radius: 8px;
+  transition: background 0.2s, transform 0.08s;
+}
+
+.invite-accept:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+/* --- Authenticated controls (visible when logged in) --- */
+.authed {
+  width: min(92vw, 420px);
+  margin: 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.account-link {
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  padding: 8px 18px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--card);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.account-link:hover {
+  border-color: var(--input-focus);
+  background: var(--input-bg);
+}
+
+.logout-btn {
+  font-size: 14px;
+  color: var(--text-dim);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  padding: 8px 16px;
+  background: transparent;
+}
+
+.logout-btn:hover {
+  color: var(--text);
+  border-color: var(--input-focus);
+  background: var(--input-bg);
 }
 
 /* --- Feedback banners --- */
@@ -255,7 +397,7 @@ button:active {
   .actions {
     flex-direction: column;
   }
-  .guest {
+  .authed {
     flex-direction: column;
   }
 }

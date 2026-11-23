@@ -31,10 +31,32 @@
 
   <!-- Game action buttons -->
   <div id="game-actions" class="game-actions" style="display:none;">
+    <!-- Contract 32: game-link generation lives on the GAME page (was the lobby).
+         Works for guests AND logged-in users. -->
+    <button id="btn-game-link" class="game-btn game-btn-secondary">Ссылка на игру</button>
+    <!-- Invite UI: visible to REGISTERED users only (sessionID cookie present).
+         Hidden for guests by gameSockets.js before first paint. -->
+    <button id="btn-invite" class="game-btn game-btn-secondary" style="display:none;">Пригласить игрока</button>
+    <!-- Method selector: only «Стандартная» for now (rapid/custom later). -->
+    <select id="method-select" disabled title="Метод">
+      <option value="standard">Стандартная</option>
+    </select>
     <button id="btn-takeback" class="game-btn game-btn-info">Takeback</button>
     <button id="btn-offer-draw" class="game-btn game-btn-secondary">Offer Draw</button>
     <button id="btn-challenge" class="game-btn game-btn-warning">Challenge</button>
     <button id="btn-resign" class="game-btn game-btn-danger">Resign</button>
+  </div>
+
+  <!-- Game link modal (contract 32): shows location.origin + /game?matchId=<id> + copy -->
+  <div id="gameLinkModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>Ссылка на игру</h3>
+      <p id="game-link-text"></p>
+      <div class="modal-actions">
+        <button id="btn-game-link-copy" class="modal-btn modal-btn-primary">Копировать</button>
+        <button id="btn-game-link-close" class="modal-btn modal-btn-secondary">Закрыть</button>
+      </div>
+    </div>
   </div>
 
   <!-- Resign confirmation modal -->

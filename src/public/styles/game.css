@@ -319,6 +319,26 @@ canvas#cnv {
   border-color: #3a6fe0;
 }
 
+/* Method selector in the actions row (contract 32): disabled, single option
+   «Стандартная» — matches the .game-btn look. */
+#method-select {
+  padding: 9px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--button-bg);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Game link modal body shows a long URL — allow wrapping, not monospace. */
+#game-link-text {
+  word-break: break-all;
+  font-size: 13px;
+}
+
 /* === Modal overlay & box === */
 .modal-overlay {
   position: fixed;

@@ -737,6 +737,106 @@ socket.on('repetitionWarning', (data) => {
   document.getElementById('repetitionWarningModal').style.display = 'block';
 });
 
+// ============================
+// Contract 32 — game link + invite (client scope)
+// ============================
+// Login state: the same sessionID-cookie check the page already uses (sendCookie)
+// to decide authenticated vs guest. Invite UI is hidden for guests.
+function guestOnGamePage() {
+  return readCookie('sessionID') == null;
+}
+
+(function initInviteUI() {
+  const inviteBtn = document.getElementById('btn-invite');
+  if (inviteBtn && guestOnGamePage()) inviteBtn.style.display = 'none';
+})();
+
+// --- «Ссылка на игру» — emit private-match, wait for the echo id, open the
+// modal with location.origin + '/game?matchId=' + id + a copy button.
+// Works for guests AND logged-in users (the server event is unchanged).
+const btnGameLink = document.getElementById('btn-game-link');
+const gameLinkModal = document.getElementById('gameLinkModal');
+const gameLinkText = document.getElementById('game-link-text');
+
+function showGameLink(id) {
+  if (!id) return;
+  if (!gameLinkModal || !gameLinkText) return;
+  const url = window.location.origin + '/game?matchId=' + id;
+  gameLinkText.textContent = url;
+  gameLinkModal.style.display = 'flex';
+}
+
+// The server echoes the generated id back on the SAME socket that requested it.
+socket.on('private-match', matchId => {
+  showGameLink(matchId);
+});
+
+if (btnGameLink) {
+  btnGameLink.addEventListener('click', () => {
+    socket.emit('private-match', 1); // argument ignored by server; it generates the id
+  });
+}
+
+const btnGameLinkClose = document.getElementById('btn-game-link-close');
+if (btnGameLinkClose) {
+  btnGameLinkClose.addEventListener('click', () => { if (gameLinkModal) gameLinkModal.style.display = 'none'; });
+}
+
+const btnGameLinkCopy = document.getElementById('btn-game-link-copy');
+if (btnGameLinkCopy) {
+  btnGameLinkCopy.addEventListener('click', () => {
+    if (!gameLinkText) return;
+    const url = gameLinkText.textContent;
+    const done = () => showToast('Ссылка скопирована');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, done);
+    } else {
+      // Fallback (non-secure context / older browsers)
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        done();
+      } catch (e) { showToast('Не удалось скопировать'); }
+    }
+  });
+}
+
+// --- «Пригласить игрока» — registered only: prompt a username, emit
+// invite:create, on invite:created navigate to /game?matchId=<id>, on
+// invite:failed show the Russian reason.
+const btnInvite = document.getElementById('btn-invite');
+
+const INVITE_FAIL_TEXT = {
+  'auth': 'Приглашение — только для зарегистрированных',
+  'no-user': 'Нет такого пользователя',
+  'self': 'Нельзя пригласить самого себя',
+  'method-na': 'Пока доступен только метод «стандартная»',
+};
+
+if (btnInvite) {
+  btnInvite.addEventListener('click', () => {
+    if (gameIsOver) return;
+    const target = (prompt('Имя пользователя для приглашения:') || '').trim();
+    if (!target) return;
+    socket.emit('invite:create', { targetUsername: target, method: 'standard' });
+  });
+}
+
+socket.on('invite:created', (data) => {
+  if (data && data.matchId) {
+    window.location.href = '/game?matchId=' + encodeURIComponent(data.matchId);
+  }
+});
+
+socket.on('invite:failed', (data) => {
+  const reason = (data && data.reason) || '';
+  showToast(INVITE_FAIL_TEXT[reason] || 'Не удалось отправить приглашение');
+});
+
 // --- Socket disconnect / error — unlock move validation ---
 socket.on('disconnect', () => {
   is_being_validated = false;

@@ -1,22 +1,66 @@
 <!DOCTYPE html>
-<!-- PLACEHOLDER (S-A): contract 32 says S-B owns this page's markup. This stub
-     only proves the server route + data pipeline: it renders the same fields
-     the final page will use. S-B will replace the body while keeping the
-     server-provided locals: username, elo, played,
-     games: [{date, opponent, result (win|loss|draw, from MY view),
-              method ('стандартная'), eloBefore, eloAfter}] newest first. -->
 <html lang="ru">
 
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Кабинет</title>
+
+  <link rel="stylesheet" href="styles/account.css">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/cookieUtil.js"></script>
+  <script src="js/theme.js"></script>
 </head>
 
 <body>
-  <h1>Кабинет: <%= username %></h1>
-  <p>Elo: <%= elo %></p>
-  <p>Сыграно партий: <%= played %></p>
-  <pre id="account-data"><%= JSON.stringify({ username, elo, played, games }, null, 2) %></pre>
+  <button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Переключить тему">
+    <span id="themeIcon">🌙</span>
+  </button>
+
+  <header class="brand">
+    <h1>Кабинет</h1>
+  </header>
+
+  <div id="account-card" class="account-card">
+    <div class="account-head">
+      <div class="account-identity">
+        <div class="account-name"><%- username %></div>
+        <div class="account-elo">Elo: <%- elo %></div>
+      </div>
+      <div class="account-count">Сыграно партий: <%- played %></div>
+    </div>
+
+    <div class="account-table-wrap">
+      <table id="games-table" class="games-table">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Соперник</th>
+            <th>Результат</th>
+            <th>Elo до</th>
+            <th>Elo после</th>
+          </tr>
+        </thead>
+        <tbody id="games-body">
+          <% (games && games.length ? games : []).forEach(function (g) { %>  <tr>
+            <td><%= g.date %></td>
+            <td><%= g.opponent %></td>
+            <td class="result result-<%= g.result %>"><%= g.result === 'win' ? 'Победа' : (g.result === 'loss' ? 'Поражение' : 'Ничья') %></td>
+            <td><%= g.eloBefore %></td>
+            <td><%= g.eloAfter %></td>
+          </tr>
+          <% }); %>
+          <% if (!games || games.length === 0) { %>  <tr class="empty-row"><td colspan="5">Партий пока нет</td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="account-foot">
+      <a href="/index" class="account-back">← В лобби</a>
+    </div>
+  </div>
 </body>
 
 </html>
