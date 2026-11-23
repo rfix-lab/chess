@@ -581,14 +581,25 @@ async function test() {
   // parallel-load runner the startGame emission can lag that much, leaving
   // em1 null and cascading failures (m1=null) into the T31 CSV rows. Wait for
   // both seats to report the match id instead.
-  await waitFor(() => em1 !== null && em2 !== null && em1 === em2, 5000);
+  // both sockets must report their SEAT (color), not just the match id:
+  // startGame(c, id) for the two sockets can arrive at different times,
+  // and the move sequence below is routed by color (e1Color) — a null
+  // color routes the first move to the wrong socket, it gets rejected
+  // (not-movers-socket) and the game ends up pre-start.
+  await waitFor(() => em1 !== null && em2 !== null && em1 === em2 && e1Color !== null && e2Color !== null, 5000);
 
   if (em1 !== null && em1 === em2) {
-    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
+    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#. Drive the moves from the
+    // socket that is actually WHITE (e1Color) — the fixed i%2->e1/e2
+    // alternation assumed e1 was white, which is not guaranteed when the two
+    // sockets seat in the opposite order (the not-movers-socket rejection seen
+    // in the load-flake trace).
+    const wSock = e1Color === 0 ? e1 : e2;
+    const bSock = e1Color === 0 ? e2 : e1;
     const seq = [[4,6,4,4],[4,1,4,3],[5,7,2,4],[1,0,2,2],[3,7,7,3],[6,0,5,2],[7,3,5,1]];
     for (let i = 0; i < seq.length; i++) {
       const [fx, fy, tx, ty] = seq[i];
-      (i % 2 === 0 ? e1 : e2).emit('move', em1, { x: fx, y: fy }, { x: tx, y: ty });
+      (i % 2 === 0 ? wSock : bSock).emit('move', em1, { x: fx, y: fy }, { x: tx, y: ty });
       await sleep(200);
     }
     await waitFor(() => e1End && e2End, 5000);
@@ -641,8 +652,9 @@ async function test() {
   ]);
 
   let rMatch = null, rEnd1 = null, rEnd2 = null, rReplay1 = null, rReplay2 = null;
-  r1.on('startGame', (c, m) => { if (rMatch === null) rMatch = m; });
-  r2.on('startGame', (c, m) => { if (rMatch === null) rMatch = m; });
+  let r1Color = null, r2Color = null;
+  r1.on('startGame', (c, m) => { r1Color = c; if (rMatch === null) rMatch = m; });
+  r2.on('startGame', (c, m) => { r2Color = c; if (rMatch === null) rMatch = m; });
   r1.on('gameEnd', d => { rEnd1 = d; });
   r2.on('gameEnd', d => { rEnd2 = d; });
   r1.on('replay', m => { rReplay1 = m; });
@@ -654,14 +666,21 @@ async function test() {
   // rMatch stayed null) with a waitFor on the seating itself: deterministic
   // when the event arrives early, and tolerant of a slow server loop when it
   // does not.
-  await waitFor(() => rMatch !== null, 5000);
+  // both sockets must report their SEAT: the mate is driven by socket
+  // alternation, so if r1 is actually BLACK (seating race) the first
+  // 'move' on r1 would be rejected and the game would never end.
+  await waitFor(() => rMatch !== null && r1Color !== null && r2Color !== null, 5000);
 
   if (rMatch !== null) {
-    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
+    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#. Drive the moves from the
+    // socket that is actually WHITE (the replay content is white-first either
+    // way, so the per-client assertions below are unaffected by who is who).
+    const whiteSock = r1Color === 0 ? r1 : r2;
+    const blackSock = r1Color === 0 ? r2 : r1;
     const seq = [[4,6,4,4],[4,1,4,3],[5,7,2,4],[1,0,2,2],[3,7,7,3],[6,0,5,2],[7,3,5,1]];
     for (let i = 0; i < seq.length; i++) {
       const [fx, fy, tx, ty] = seq[i];
-      (i % 2 === 0 ? r1 : r2).emit('move', rMatch, { x: fx, y: fy }, { x: tx, y: ty });
+      (i % 2 === 0 ? whiteSock : blackSock).emit('move', rMatch, { x: fx, y: fy }, { x: tx, y: ty });
       await sleep(200);
     }
     if (rEnd1 && rEnd2 && rEnd1.reason === 'checkmate' && rEnd2.reason === 'checkmate')
@@ -762,16 +781,19 @@ async function test() {
   b3b.on('gameEnd', d => { b3EndB = d; });
   b3a.emit('auth', null, null);
   b3b.emit('auth', null, null);
-  // T33 hardening: wait for the server to seat the pair (both startGame
-  // echoes) instead of a fixed 500 ms — under the parallel-load runner the
-  // seat round-trip can exceed it, leaving b3Match null.
-  await waitFor(() => b3Match !== null, 5000);
+  // T33 hardening: wait for BOTH sockets to report their color, not just the
+  // first startGame (b3Match is set by the FIRST echo, so it can be non-null
+  // while the server has not yet seated the OTHER socket — the disconnect
+  // below would then hit a socket whose data.user is still null and the
+  // handler returns early, emitting no gameEnd: the flake).
+  await waitFor(() => b3Match !== null && b3aColor !== null && b3bColor !== null, 5000);
   if (b3Match !== null) {
     b3a.disconnect();
-    // T33 hardening: wait for the immediate gameEnd on the winner side
-    // (the pre-start opponent_disconnect path) instead of a fixed 300 ms.
-    await waitFor(() => (b3aColor === 0 ? b3EndB : b3EndA) !== null, 3000);
-    const winnerEnd = b3aColor === 0 ? b3EndB : b3EndA; // b3b stayed connected
+    // The winner is ALWAYS the socket that stayed connected (b3b) — the
+    // pre-start path ends the game for the survivor regardless of color, so
+    // no color-keyed selection is needed (the old ternary was also inverted).
+    await waitFor(() => b3EndB !== null, 3000);
+    const winnerEnd = b3EndB; // b3b stayed connected
     if (winnerEnd && winnerEnd.reason === 'opponent_disconnect' && winnerEnd.result === 'win')
       pass('B3: pre-start disconnect → opponent gets gameEnd(opponent_disconnect, win) immediately');
     else fail('B3: pre-start disconnect → immediate gameEnd', `winnerEnd=${JSON.stringify(winnerEnd)}`);
@@ -820,28 +842,42 @@ async function test() {
   b4b.on('validated', (board, turn, extra) => { b4bValid++; if (!(extra && extra.rejected)) b4MoveApplied = true; });
   b4w.emit('auth', null, null);
   b4b.emit('auth', null, null);
-  // T33 hardening: wait for the server to seat the pair (both startGame
-  // echoes) instead of a fixed 500 ms — under the parallel-load runner the
-  // seat round-trip can exceed it, leaving b4Match null.
-  await waitFor(() => b4Match !== null, 5000);
+  // T33 hardening: wait for the server to seat the pair — BOTH sockets must
+  // report their color, not just one (b4Match is set by the FIRST startGame
+  // echo, so b4Match!==null alone is satisfied before the other seat reports
+  // its color; the move below routes by color, and a null color rejects it
+  // not-movers-socket, leaving moveHistory=0 → the F5 pre-start gate kills
+  // the match before the reconnect (the gameNotFound flake).)
+  await waitFor(() => b4Match !== null && b4wColor !== null && b4bColor !== null, 5000);
+  // The two guest auth packets are two separate connections: under load the
+  // server can seat them in the OPPOSITE order (b4b as white, b4w as black).
+  // The row must therefore key on the socket the server actually gave color 0,
+  // never on the b4w/b4wColor variables — that is the flake's root cause:
+  // the old code told the white socket to play the BLACK move (illegal →
+  // rejected → moveHistory stays 0 → the F5 disconnect reads it as pre-start
+  // and kills the match before the reconnect, gameNotFound). The board is
+  // fixed-orientation (white pawns at y=6), so whichever socket is white
+  // always plays e2-e4, and the reconnect must carry that socket's color (0).
+  const wSock = b4wColor === 0 ? b4w : b4b;
+  const oppSock = b4wColor === 0 ? b4b : b4w;
   if (b4Match !== null) {
-    // One move by white (e2-e4) so moveHistory.length = 1.
-    // T33 hardening: wait for the move to be APPLIED (a 'validated' echo on the
-    // mover) instead of a blind 300 ms — under the parallel-load runner the
-    // move event can lag and the disconnect below used to race it (F5 row
-    // flakes: the F5 pre-start gate saw moveHistory.length=0).
-    const wMoveFirst = b4wColor === 0;
-    if (wMoveFirst) {
-      b4w.emit('move', b4Match, { x: 4, y: 6 }, { x: 4, y: 4 });
-    } else {
-      b4w.emit('move', b4Match, { x: 4, y: 1 }, { x: 4, y: 3 });
-    }
+    // One move by the socket that is actually WHITE (e2-e4) so
+    // moveHistory.length = 1, then the white socket disconnects (F5) and a
+    // fresh socket reconnects as the same white player.
+    // T33 hardening: wait for the move to be APPLIED (a 'validated' echo on
+    // the mover) instead of a blind 300 ms — under the parallel-load runner
+    // the move event can lag and the disconnect used to race it (F5 flakes:
+    // the pre-start gate saw moveHistory.length=0).
+    wSock.emit('move', b4Match, { x: 4, y: 6 }, { x: 4, y: 4 });
     await waitFor(() => b4MoveApplied, 3000);
-    await sleep(150); // let the server finish the disconnect bookkeeping before
-    // the F5 race window below (the echo above only proves the MOVE was
-    // applied, not that the next event's dispatch slot is free under load)
-    const oldWId = b4w.id; // socket.io id BEFORE disconnect (the F5 race case)
-    b4w.disconnect();
+    // T33 hardening: the echo proves the client RECEIVED the applied-move
+    // acknowledgement; on the server the disconnect handler can still run
+    // before the move handler's bookkeeping settles, so a short settle after
+    // the echo closes that F5 gap (endMatch would otherwise read
+    // moveHistory.length===0 and remove the match pre-reconnect).
+    await sleep(300);
+    const oldWId = wSock.id; // socket.io id BEFORE disconnect (the F5 race case)
+    wSock.disconnect();
     await sleep(100);
     // A NEW socket (the reloaded page) reconnects as the same white player,
     // carrying the old socket's id as prevSocketId.
@@ -851,22 +887,25 @@ async function test() {
     b4w2.on('reconnected', (color, gid, boardState, turnState) => { b4Recon = { color, gid, boardState, turnState }; });
     b4w2.on('gameNotFound', () => { b4NotFound = true; });
     b4w2.on('gameEnd', d => { b4W2End = d; });
-    b4w2.emit('reconnect', { gameId: b4Match, color: b4wColor, sessionID: null, prevSocketId: oldWId });
+    // Reconnect as the same WHITE player: carry the white socket's color (0) —
+    // NOT b4wColor, which is the first-emitting socket's color and may be 1.
+    b4w2.emit('reconnect', { gameId: b4Match, color: 0, sessionID: null, prevSocketId: oldWId });
     // T33 hardening: wait for an OUTCOME (reconnected or gameNotFound) instead
     // of a fixed 300 ms — the reconnect round-trip is the slowest event in
     // this block under load and the row flaked when it lagged the assertion.
     await waitFor(() => b4Recon !== null || b4NotFound, 3000);
-    if (!b4NotFound && b4Recon && b4Recon.color === b4wColor && b4Recon.gid === b4Match &&
+    if (!b4NotFound && b4Recon && b4Recon.color === 0 && b4Recon.gid === b4Match &&
         Array.isArray(b4Recon.boardState) && b4Recon.boardState.length === 8 &&
         (b4Recon.turnState === 0 || b4Recon.turnState === 1))
       pass('B4: F5 reconnect (prevSocketId=old) → reconnected (not gameNotFound) with board+turnState');
     else fail('B4: F5 reconnect', `notFound=${b4NotFound} recon=${b4Recon && JSON.stringify({ color: b4Recon.color, gid: b4Recon.gid, turn: b4Recon.turnState, rows: b4Recon.boardState && b4Recon.boardState.length })}`);
-    // Black unaffected: the reconnected white did NOT end the game for black.
+    // The opponent (non-reconnected) socket is left alone: the reconnected
+    // white did NOT end the game for them. Clean up whichever socket it is.
     b4w2.disconnect();
+    oppSock.disconnect();
   } else {
     fail('B4: F5 reconnect', 'match null (startGame never arrived)');
   }
-  b4b.disconnect();
 
   // === T-B6: session persistence across a container "restart" ===
   // Simulates exactly what a deploy/restart does: the in-RAM user array is
