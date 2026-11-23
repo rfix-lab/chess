@@ -1,23 +1,64 @@
-/* Users directory + public profile (contract 36, S-B2 styling of A2's
-   server-rendered shells). Loaded AFTER styles/account.css, which provides
-   the theme tokens and the shared table look; this file adds only what the
-   users page has beyond the account page: the invite context menu, the toast,
-   and the own-row highlight. D1 will restyle later — class names are the
-   contract (.user-row, .user-self, .user-menu, .user-menu-item). */
+/* Users directory (contract 36c, on shared tokens.css + account.css chrome).
+   Loaded AFTER account.css. Adds only what /users has beyond the account
+   page: the hint line, the directory-row states (hover / own row), the
+   invite context menu, and the toast wiring (the toast component itself
+   lives in tokens.css). Class names are the contract
+   (.user-row, .user-self, .user-menu, .user-menu-item, .user-menu-method,
+   .user-menu-invite). */
 
-/* Directory rows: clickable (profile link) */
+/* Short helper line under the title: tells the visitor how to invite. */
+.directory-hint {
+  margin: calc(-1 * var(--sp-4)) 0 var(--sp-4);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* Numeric columns of the directory align with the account table convention. */
+.users-table td:nth-child(2),
+.users-table td:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.users-table th:nth-child(2),
+.users-table th:nth-child(3) {
+  text-align: right;
+}
+
+/* The username cell links to the public profile. */
+.users-table .user-row td:first-child a {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-table .user-row td:first-child a:hover {
+  color: var(--accent);
+}
+
+/* Directory rows: clickable (profile link). */
 .games-table .user-row {
   cursor: pointer;
+}
+
+.games-table .user-row:hover td {
+  background: var(--line);
 }
 
 /* Own row (the logged-in user): a soft accent wash + a "(вы)" marker is set
    by users.js text; never hide the row. */
 .games-table .user-self td {
-  background: rgba(58, 111, 224, 0.14);
+  background: var(--accent-soft);
+  border-bottom-color: transparent;
 }
 
-.games-table .user-row:hover td {
-  background: var(--button-hover);
+.games-table .user-self:hover td {
+  background: var(--accent-soft);
 }
 
 /* ---- Invite context menu (created by users.js, anchored near the row) ---- */
@@ -25,30 +66,42 @@
   position: fixed;
   z-index: 100;
   min-width: 180px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
   padding: 6px;
 }
 
 .user-menu-head {
   padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 
 .user-menu-item {
-  padding: 9px 10px;
-  border-radius: 7px;
-  font-size: 14px;
+  padding: 10px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  font-weight: 600;
   cursor: pointer;
+  transition: background var(--t-fast);
 }
 
 .user-menu-item:hover {
-  background: var(--button-bg);
+  background: var(--card-2);
 }
 
+/* The top «Пригласить» entry is a heading-like row, not a selectable action. */
+.user-menu-invite {
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+/* Method choices sit under the «Пригласить» heading, indented. */
 .user-menu-method {
   margin-left: 12px;
   color: var(--text-dim);
@@ -58,37 +111,4 @@
   color: var(--text);
 }
 
-/* ---- Toast (the page has no game.css, so the toast lives here) ---- */
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  z-index: 200;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  color: var(--text);
-  padding: 12px 18px;
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-  font-size: 14px;
-  animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s;
-}
-
-@keyframes toastIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-@keyframes toastOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
-.hide {
-  display: none !important;
-}
-
-.show {
-  display: initial;
-}
+/* ---- Toast: the shared component from tokens.css; nothing page-specific. ---- */

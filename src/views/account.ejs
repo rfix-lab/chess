@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Кабинет</title>
 
+  <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/account.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <script src="/socket.io/socket.io.js"></script>
@@ -19,47 +20,52 @@
     <span id="themeIcon">🌙</span>
   </button>
 
-  <header class="brand">
-    <h1>Кабинет</h1>
-  </header>
+  <div class="page">
+    <header class="brand">
+      <nav class="page-nav">
+        <a href="/index" class="nav-back">← В лобби</a>
+        <h1 class="nav-title">Кабинет</h1>
+        <span class="nav-spacer"></span>
+      </nav>
+    </header>
 
-  <div id="account-card" class="account-card">
-    <div class="account-head">
-      <div class="account-identity">
-        <div class="account-name"><%- username %></div>
-        <div class="account-elo">Elo: <%- elo %></div>
+    <div id="account-card" class="account-card">
+      <div class="account-head">
+        <div class="account-identity">
+          <div class="avatar"><%= username.charAt(0) %></div>
+          <div class="account-who">
+            <div class="account-name"><%- username %></div>
+            <div class="account-elo">Elo: <%- elo %></div>
+          </div>
+        </div>
+        <div class="account-count">Сыграно партий: <%- played %></div>
       </div>
-      <div class="account-count">Сыграно партий: <%- played %></div>
-    </div>
 
-    <div class="account-table-wrap">
-      <table id="games-table" class="games-table">
-        <thead>
-          <tr>
-            <th>Дата</th>
-            <th>Соперник</th>
-            <th>Результат</th>
-            <th>Elo до</th>
-            <th>Elo после</th>
-          </tr>
-        </thead>
-        <tbody id="games-body">
-          <% (games && games.length ? games : []).forEach(function (g) { %>  <tr>
-            <td><%= g.date %></td>
-            <td><%= g.opponent %></td>
-            <td class="result result-<%= g.result %>"><%= g.result === 'win' ? 'Победа' : (g.result === 'loss' ? 'Поражение' : 'Ничья') %></td>
-            <td><%= g.eloBefore %></td>
-            <td><%= g.eloAfter %></td>
-          </tr>
-          <% }); %>
-          <% if (!games || games.length === 0) { %>  <tr class="empty-row"><td colspan="5">Партий пока нет</td></tr>
-          <% } %>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="account-foot">
-      <a href="/index" class="account-back">← В лобби</a>
+      <div class="account-table-wrap">
+        <table id="games-table" class="games-table">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Соперник</th>
+              <th>Результат</th>
+              <th>Elo до</th>
+              <th>Elo после</th>
+            </tr>
+          </thead>
+          <tbody id="games-body">
+            <% (games && games.length ? games : []).forEach(function (g) { %>  <tr>
+              <td><%= g.date %></td>
+              <td><%= g.opponent %></td>
+              <td class="result result-<%= g.result %>"><%= g.result === 'win' ? 'Победа' : (g.result === 'loss' ? 'Поражение' : 'Ничья') %></td>
+              <td><%= g.eloBefore %></td>
+              <td><%= g.eloAfter %></td>
+            </tr>
+            <% }); %>
+            <% if (!games || games.length === 0) { %>  <tr class="empty-row"><td colspan="5">Партий пока нет</td></tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </body>

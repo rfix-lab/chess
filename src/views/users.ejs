@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Пользователи</title>
 
+  <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/account.css">
   <link rel="stylesheet" href="styles/users.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -20,46 +21,49 @@
     <span id="themeIcon">🌙</span>
   </button>
 
-  <header class="brand">
-    <h1>Пользователи</h1>
-  </header>
+  <div class="page">
+    <header class="brand">
+      <nav class="page-nav">
+        <a href="/index" class="nav-back">← В лобби</a>
+        <h1 class="nav-title">Пользователи</h1>
+        <span class="nav-spacer"></span>
+      </nav>
+    </header>
 
-  <div class="account-card">
-    <!-- T33 (contract 36): server-rendered placeholder skeleton (Имя | Elo | Игр).
-         S-B may re-render the rows client-side from /api/users/stats in
-         src/public/js/users.js (context menu / long-press «Приглатить»); D1
-         restyles later. Rows sorted elo desc, then name asc (same order as the API). -->
-    <div class="account-table-wrap">
-      <table id="users-table" class="games-table">
-        <thead>
-          <tr>
-            <th>Имя</th>
-            <th>Elo</th>
-            <th>Игр</th>
-          </tr>
-        </thead>
-        <tbody id="users-body">
-          <% (users && users.length ? users : []).forEach(function (u) { %>  <tr class="user-row" data-username="<%= u.username %>">
-            <td><a href="/user?name=<%= u.username %>"><%= u.username %></a></td>
-            <td><%= u.elo %></td>
-            <td><%= u.games %></td>
-          </tr>
-          <% }); %>
-          <% if (!users || users.length === 0) { %>  <tr class="empty-row"><td colspan="3">Пользователей пока нет</td></tr>
-          <% } %>
-        </tbody>
-      </table>
+    <div class="account-card">
+      <p class="directory-hint">Нажмите правой кнопкой (или удерживайте) строку, чтобы пригласить игрока.</p>
+      <!-- T33 (contract 36): server-rendered placeholder skeleton (Имя | Elo | Игр).
+           S-B may re-render the rows client-side from /api/users/stats in
+           src/public/js/users.js (context menu / long-press «Приглатить»); D1
+           restyles later. Rows sorted elo desc, then name asc (same order as the API). -->
+      <div class="account-table-wrap">
+        <table id="users-table" class="games-table users-table">
+          <thead>
+            <tr>
+              <th>Имя</th>
+              <th>Elo</th>
+              <th>Игр</th>
+            </tr>
+          </thead>
+          <tbody id="users-body">
+            <% (users && users.length ? users : []).forEach(function (u) { %>  <tr class="user-row" data-username="<%= u.username %>">
+              <td><a href="/user?name=<%= u.username %>"><%= u.username %></a></td>
+              <td><%= u.elo %></td>
+              <td><%= u.games %></td>
+            </tr>
+            <% }); %>
+            <% if (!users || users.length === 0) { %>  <tr class="empty-row"><td colspan="3">Пользователей пока нет</td></tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Contract 36 (S-B): the directory client — re-renders the rows from
+      /api/users/stats and wires the invite context menu / long-press. Placed at
+      the END of the body (single copy; the head closes before <body> so the
+      server-rendered table is not swallowed as script text by the HTML5 parser). -->
+      <script src="js/users.js"></script>
     </div>
-
-    <div class="account-foot">
-      <a href="/index" class="account-back">← В лобби</a>
-    </div>
-
-    <!-- Contract 36 (S-B): the directory client — re-renders the rows from
-    /api/users/stats and wires the invite context menu / long-press. Placed at
-    the END of the body (single copy; the head closes before <body> so the
-    server-rendered table is not swallowed as script text by the HTML5 parser). -->
-    <script src="js/users.js"></script>
   </div>
 
 </body>

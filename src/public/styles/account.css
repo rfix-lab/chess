@@ -1,71 +1,37 @@
-/* === Account page ("Кабинет") — reuses the game.css theme vars ===
-   Self-contained: defines the same theme tokens as game.css so the page works
-   standalone (theme.js applies data-theme on <html>, themeToggle present).
-   JS-referenced ids: themeToggle, themeIcon, account-card, games-table,
-   games-body, account-name, account-elo, account-count. */
-
-:root,
-:root[data-theme="dark"] {
-  --bg: #12161f;
-  --text: #eef2f9;
-  --text-dim: #9aa6bb;
-  --panel-bg: #1a202c;
-  --panel-border: #2a3347;
-  --button-bg: #2a3347;
-  --button-hover: #36415a;
-  --coord-color: #9aa6bb;
-  --accent: #3a6fe0;
-  --accent-hover: #4a7ff0;
-  --win: #2f9e6b;
-  --loss: #cf4636;
-  --draw: #e0862b;
-  --shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-  color-scheme: dark;
-}
-
-:root[data-theme="light"] {
-  --bg: #eef1f7;
-  --text: #242a36;
-  --text-dim: #5b6577;
-  --panel-bg: #ffffff;
-  --panel-border: #dbe1ec;
-  --button-bg: #e6eaf3;
-  --button-hover: #d5dbea;
-  --coord-color: #5b6577;
-  --accent: #3a6fe0;
-  --accent-hover: #4a7ff0;
-  --win: #2f9e6b;
-  --loss: #cf4636;
-  --draw: #c77414;
-  --shadow: 0 14px 36px rgba(30, 45, 90, 0.16);
-  color-scheme: light;
-}
-
-* { box-sizing: border-box; }
+/* === Account family chrome: account (Кабинет), users (directory),
+   user (public profile) — contract 36c on shared tokens.css.
+   tokens.css (loaded first) owns the palette, type scale, spacing, buttons,
+   .chip, .card, .page-nav and .hide/.show. This file adds the account-page
+   specific parts: the body backdrop, the theme toggle, the card, the
+   identity header and the games table (shared by all three pages). */
 
 body {
   margin: 0;
   min-height: 100vh;
-  padding: 24px 16px;
   background:
-    radial-gradient(1100px 620px at 50% -10%, var(--button-bg), transparent 55%),
-    var(--bg);
+    radial-gradient(1100px 620px at 50% -10%, var(--bg-glow), transparent 55%),
+    var(--bg-0);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  transition: background 0.3s, color 0.3s;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: var(--lh);
+  transition: background var(--t), color var(--t);
 }
 
-.brand { text-align: center; margin: 8px 0 18px; }
-.brand h1 { margin: 0; font-size: 30px; font-weight: 800; }
+/* Brand header (kept for the EJS <header class="brand"> shells — the
+   page-nav row is styled by tokens.css; the h1 in the nav uses .nav-title). */
+.brand {
+  display: contents;
+}
 
-/* Theme toggle (same look as the game page) */
+/* Theme toggle (same look as the game page). */
 .theme-toggle {
   position: fixed;
   top: 14px;
   right: 14px;
   z-index: 999;
-  background: var(--button-bg);
-  border: 1px solid var(--panel-border);
+  background: var(--card-2);
+  border: 1px solid var(--line);
   border-radius: 50%;
   width: 42px;
   height: 42px;
@@ -75,97 +41,201 @@ body {
   align-items: center;
   justify-content: center;
   color: var(--text);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  transition: background 0.3s, border-color 0.3s, transform 0.2s;
+  box-shadow: var(--shadow-1);
+  transition: background var(--t), border-color var(--t), transform var(--t-fast);
 }
-.theme-toggle:hover { background: var(--button-hover); transform: scale(1.08); }
 
+.theme-toggle:hover {
+  background: var(--card);
+  border-color: var(--line-strong);
+  transform: scale(1.08);
+}
+
+/* Legacy var indirection for the per-page CSS that referenced game.css names. */
+:root {
+  --panel-bg: var(--card);
+  --panel-border: var(--line);
+  --button-bg: var(--card-2);
+  --button-hover: var(--line-strong);
+  --shadow: var(--shadow-2);
+  --accent-hover: var(--accent-strong);
+  --win: var(--ok);
+  --loss: var(--danger);
+  --draw: var(--warn);
+}
+
+.page {
+  padding-top: calc(var(--sp-3) + env(safe-area-inset-top));
+}
+
+/* --- Identity header (shared by account + user pages) --- */
 .account-card {
-  width: min(94vw, 760px);
-  margin: 0 auto;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  padding: 26px 26px 22px;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
 }
 
 .account-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--sp-4);
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  margin-bottom: var(--sp-5);
 }
 
-.account-name { font-size: 22px; font-weight: 800; }
-.account-elo { font-size: 14px; color: var(--text-dim); margin-top: 4px; }
+.account-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* Monogram avatar: a ringed circle with the first letter of the name. */
+.avatar {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.account-who {
+  min-width: 0;
+}
+
+.account-name {
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-elo {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  margin-top: var(--sp-1);
+}
 
 .account-count {
-  font-size: 14px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--text);
-  background: var(--button-bg);
-  border: 1px solid var(--panel-border);
+  background: var(--card-2);
+  border: 1px solid var(--line);
   padding: 8px 14px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
+  white-space: nowrap;
 }
 
+/* --- Games table (shared by account + user profiles) ---
+   Mobile-first: rows are >= 48px tall (44px touch target contract);
+   on narrow screens the wrap div scrolls horizontally instead of cramping. */
 .account-table-wrap {
   width: 100%;
   overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card-2);
 }
 
 .games-table {
   width: 100%;
+  min-width: 480px;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 .games-table th,
 .games-table td {
-  padding: 10px 12px;
+  padding: 13px 14px;
   text-align: left;
-  border-bottom: 1px solid var(--panel-border);
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.games-table tr {
+  min-height: 48px;
 }
 
 .games-table thead th {
-  color: var(--text-dim);
+  color: var(--text-faint);
   font-weight: 700;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.5px;
   white-space: nowrap;
+  padding-top: var(--sp-3);
+  padding-bottom: var(--sp-3);
 }
 
-.games-table tbody tr:last-child td { border-bottom: none; }
-.games-table tbody tr:hover td { background: var(--button-bg); }
+.games-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.games-table tbody tr {
+  transition: background var(--t-fast);
+}
+
+.games-table tbody tr:hover td {
+  background: var(--line);
+}
 
 .empty-row td {
   text-align: center;
-  color: var(--text-dim);
-  padding: 20px;
+  color: var(--text-faint);
+  padding: var(--sp-6) var(--sp-3) !important;
 }
 
-/* Result colouring by outcome (win/loss/draw — contract field `result`) */
-.result { font-weight: 700; }
-.result-win { color: var(--win); }
-.result-loss { color: var(--loss); }
-.result-draw { color: var(--draw); }
-
-.account-foot { margin-top: 18px; text-align: center; }
-
-.account-back {
-  display: inline-block;
-  text-decoration: none;
-  color: var(--text);
+/* Result colouring by outcome (win/loss/draw — contract field `result`).
+   Chips: soft-tinted background with the status colour — readable at a
+   glance, consistent with the tokens. */
+.result {
   font-weight: 700;
-  font-size: 14px;
-  background: var(--button-bg);
-  border: 1px solid var(--panel-border);
-  padding: 9px 18px;
-  border-radius: 10px;
-  transition: background 0.2s, border-color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
 }
-.account-back:hover { background: var(--button-hover); border-color: var(--accent); }
+
+.result-win {
+  color: var(--win);
+  background: var(--ok-soft);
+  border: 1px solid var(--win);
+}
+
+.result-loss {
+  color: var(--loss);
+  background: var(--danger-soft);
+  border: 1px solid var(--loss);
+}
+
+.result-draw {
+  color: var(--draw);
+  background: var(--warn-soft);
+  border: 1px solid var(--draw);
+}
+
+/* Elo columns read as numbers: right aligned, tabular figures. */
+td:nth-child(n+4) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.games-table th:nth-child(n+4) {
+  text-align: right;
+}
