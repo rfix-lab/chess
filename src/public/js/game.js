@@ -462,6 +462,15 @@ function completeDrag(px, py) {
     // value arrives with 'validated' (see sendMoveToServer comment).
     socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
+    // USER-BUGHUNT 2 (2026-11-23): dropping on an ILLEGAL square -> server
+    // REJECTS -> the 'validated' rejected branch keeps the client board
+    // untouched, while the render loop had left from_position BLANK in the
+    // array for the whole life of the grab and the cleared grab state never
+    // restores it: the dragged piece simply vanished. Optimistic drawing is
+    // server-driven — restore the source square right at emit; an accepted
+    // move replaces the whole board via 'validated' anyway, so the restored
+    // piece is only visible on the rejection path.
+    board[from_position.y][from_position.x] = holding_piece & 0b1111;
     // The drag is finished HERE. If the holding state lingers, handle_drag()
     // blanks the square under the cursor on its next tick — and once the
     // 'validated' broadcast has replaced the board, that blank wipes the

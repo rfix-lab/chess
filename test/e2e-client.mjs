@@ -443,6 +443,21 @@ try {
     logRow('H3 selection highlight pixels land on e3, NOT on the transposed mirror d4',
       tinted && mirrorClean ? 'PASS' : 'FAIL',
       `e3 ${JSON.stringify(e3Before)}->${JSON.stringify(e3After)} tinted=${tinted}; d4 ${JSON.stringify(d4Before)}->${JSON.stringify(d4After)} clean=${mirrorClean}`);
+
+    // H4: DRAG own pawn e2 onto the ILLEGAL target e5 (blocked) — the server
+    // rejects and the rejected branch keeps the client board, so the piece
+    // must be restored on e2 by completeDrag itself (user report 2026-11-23:
+    // "dragging my piece to an unavailable square makes it disappear").
+    await drive(white.page, toXY('e2'), toXY('e5'), 'drag');
+    await sleep(300); // server REJECTED + shake + rejected validated round-trip
+    const h4Board = await white.page.evaluate(() =>
+      window.__chessDebug.getBoard().map(r => r.slice().map(v => v & 0b1111)));
+    const h4Count = h4Board.flat().filter(v => v !== 0).length;
+    const h4Pawn = h4Board[6][4];
+    const h4Applied = appliedLines().length;
+    logRow('H4 drag own piece to illegal square (e2->e5 drag) -> rejected, piece stays on e2, board intact',
+      h4Pawn === 1 && h4Count === 32 && h4Applied === 0 ? 'PASS' : 'FAIL',
+      `board[6][4]=${h4Pawn} (want 1), pieces=${h4Count} (want 32), appliedLines=${h4Applied} (want 0)`);
   }
 
   // ---------- E-ill: illegal-move probe (white e2->e5, blocked by own pawn) ----------
