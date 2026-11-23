@@ -436,6 +436,15 @@ function completeDrag(px, py) {
     let pos = layout.pixelToSquare(px, py);
     let i = pos ? pos.y : -1, j = pos ? pos.x : -1;
 
+    // Drag released on the SAME square it started: cancel silently — no
+    // socket emit, so no server rejection, no wrong_move_sound + shake.
+    // releaseGrab() restores the loop-blanked source square (no board or
+    // captured-list mutation); the normal redraw shows the snapped-back piece.
+    if (from_position && i === from_position.y && j === from_position.x) {
+        releaseGrab();
+        return;
+    }
+
     // store the actions, these will be sent to the server
     old_piece = (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares)
         ? board[i][j] : blank; // mouseup outside the board -> treat as no capture
