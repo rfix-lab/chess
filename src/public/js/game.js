@@ -211,7 +211,9 @@ function render_board() {
     ctx.textBaseline = 'middle';
     ctx.font = Math.floor(side_len_square * 0.75) + 'px sans-serif';
     ctx.lineJoin = 'round';
-    ctx.lineWidth = Math.max(1, side_len_square * 0.045);
+    // OUTLINE WEIGHT (user bughunt 2026-11-23): 0.045 produced a ~3px halo on
+    // 64px cells — 2.5x too thick. 0.018 keeps the glyph edge readable.
+    ctx.lineWidth = Math.max(0.5, side_len_square * 0.018);
     for (let i = 0; i < no_of_squares; i++) {
         for (let j = 0; j < no_of_squares; j++) {
             const v = board[i][j] & 0b1111;
@@ -250,22 +252,29 @@ function draw() {
                 ctx.fillStyle = check_square_color;
             }
 
-            ctx.fillRect(offset_x + i * side_len_square,
-                offset_y + j * side_len_square,
+            ctx.fillRect(offset_x + j * side_len_square,
+                offset_y + i * side_len_square,
                 side_len_square, side_len_square);
 
             // Click-to-move: selected square highlight
+            // PIXEL TRANSPOSITION FIX (2026-11-23, user bughunt): every fillRect
+            // here used x=i, y=j while pieces (render_board), pixelToSquare and
+            // the board convention board[y][x] all use x=j, y=i. Result: every
+            // overlay (last-move/check/en-passant squares, selection, legal-move
+            // tints) rendered mirrored across the main diagonal while the JS
+            // state was correct — invisible to state-reading tests, glaring in
+            // the browser. Geometry only change; keys/conditions untouched.
             if (selectedSquare && j === selectedSquare.x && i === selectedSquare.y) {
                 ctx.globalAlpha = selected_square_opacity;
                 ctx.fillStyle = selected_square_color;
-                ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
+                ctx.fillRect(offset_x + j * side_len_square, offset_y + i * side_len_square, side_len_square, side_len_square);
                 ctx.globalAlpha = 1.0;
             }
             // Click-to-move: legal move indicators
             if (legalMoveSquares.has(j + ',' + i)) {
                 ctx.globalAlpha = 0.3;
                 ctx.fillStyle = possible_move_color;
-                ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
+                ctx.fillRect(offset_x + j * side_len_square, offset_y + i * side_len_square, side_len_square, side_len_square);
                 ctx.globalAlpha = 1.0;
             }
         }
@@ -388,6 +397,12 @@ function grabDragPiece(px, py) {
     let i = pos.y, j = pos.x;
     if ((board[i][j] & 0b1111) === 0)
         return;
+    // USER-BUGHUNT FIX (2026-11-23): grabbing an OPPONENT piece blanked its
+    // square just the same (the render loop clears from_position while a grab
+    // is active) — "touching any piece makes it disappear". Only our own
+    // pieces may be grabbed; the click-to-move path handles enemy squares.
+    if (getVisualPieceColor(board[i][j]) !== my_color)
+        return;
     // set the holding piece to whatever is on that square
     is_holding_piece = true;
     // strip indicator bits (last-move/check/en-passant, >= 0b10000): the held
@@ -395,6 +410,23 @@ function grabDragPiece(px, py) {
     // and a raw value would plant a piece+indicator ghost square.
     holding_piece = board[i][j] & 0b1111;
     from_position = { x: j, y: i };
+}
+
+// Shared grab release for every NON-drag end of a grab (click path on
+// mouseup/touchend, window-level mouseup after a drop outside the canvas,
+// cancelled grab in handle_drag). The render loop blanks from_position while
+// a grab is live; clearing is_holding_piece WITHOUT restoring that square
+// deleted the piece off the board array — user complaint "a touched piece
+// disappears" (a quick click kept the grab live across one tick, then the
+// click path dropped the state). Restore only when the square is still the
+// loop-blanked hole: if an authoritative update already refilled it, leave it.
+function releaseGrab() {
+    if (!is_holding_piece) return;
+    if (from_position && board[from_position.y][from_position.x] === blank)
+        board[from_position.y][from_position.x] = holding_piece & 0b1111;
+    is_holding_piece = false;
+    dragSettled = false;
+    holding_piece = 0;
 }
 
 function completeDrag(px, py) {
@@ -470,7 +502,7 @@ function handle_drag() {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.lineJoin = 'round';
-            ctx.lineWidth = Math.max(1, (side_len / no_of_squares) * 0.045);
+            ctx.lineWidth = Math.max(0.5, (side_len / no_of_squares) * 0.018);
             drawPieceGlyph(sprites[holding_piece], (holding_piece & black) === 0,
                 mouse_x, mouse_y);
             ctx.textAlign = 'start';
@@ -478,16 +510,9 @@ function handle_drag() {
         }
     }
     else if (is_holding_piece) {
-        // Reached ONLY for a cancelled grab: the mouse was released outside
-        // the canvas so the mouseup/ontouchend handlers never fired. A
-        // COMPLETED drop is finalized (and its holding state cleared) inside
-        // completeDrag(), so this branch must never mutate the board for it.
-        // Restore the piece on its original square (the render loop blanks
-        // that square while a piece is held).
-        board[from_position.y][from_position.x] = holding_piece & 0b1111;
-        is_holding_piece = false;
-        dragSettled = false;
-        holding_piece = 0;
+        // Cancelled grab: mouse released outside the canvas so no mouseup hit
+        // the canvas. A COMPLETED drop is finalized inside completeDrag().
+        releaseGrab();
     }
 }
 
@@ -513,18 +538,22 @@ function display_possible_moves(){
     let moves = genLegalMoves(new_board, new_from_position, null, lastMove);
     // console.log(moves);
 
-    // For every legal move draw a green circle indicating that
+    // For every legal move draw a green circle indicating that square.
+    // BUGHUNT FIX (2026-11-23): was a 15px '⬤' glyph drawn from the square's
+    // TOP-LEFT with textAlign 'start' and an off_y of offset_y*1.5 — visibly
+    // off-center and size-fixed. Now a centered arc at the true square center
+    // (x=j convention), scaled with the cell.
+    ctx.beginPath();
     for(let m of moves){
         ctx.fillStyle = possible_move_color;
-        ctx.font = '15px sans-serif';
-        let off_x = offset_x + (side_len_square) / 3;
-        let off_y = offset_y * 1.5 + (side_len_square) / 3;
         // rotate the engine target back to visual coordinates
         let t = layout.orientToVisual(m.to.x, m.to.y, my_color);
-        ctx.fillText('⬤', off_x + t.x * side_len_square,
-        off_y + t.y * side_len_square);
-            // ⬤
+        ctx.moveTo(offset_x + t.x * side_len_square + side_len_square / 2 + side_len_square * 0.16, offset_y + t.y * side_len_square + side_len_square / 2);
+        ctx.arc(offset_x + t.x * side_len_square + side_len_square / 2,
+                offset_y + t.y * side_len_square + side_len_square / 2,
+                side_len_square * 0.16, 0, 2 * Math.PI);
     }
+    ctx.fill();
 }
 
 window.onload = () => {
@@ -585,14 +614,11 @@ canvas.onmouseup = (e) => {
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
             executeClickToMove(j, i);
         }
-        // BUGFIX (Immortal-game audit): mousedown grabbed a piece (is_holding_piece),
-        // but the CLICK path never released that grab state. sendMoveToServer then
-        // reuses from_position for the move's origin, and the render loop's
-        // cancelled-grab branch later RESTORED the stale held piece onto it —
-        // planting a ghost piece (with stale indicator bits) on the client board
-        // after the next 'validated'. A completed click must leave no grab state.
-        is_holding_piece = false;
-        holding_piece = 0;
+        // BUGFIX (Immortal-game audit): a completed click must leave no grab
+        // state. USER-BUGHUNT (2026-11-23): release via releaseGrab() so the
+        // loop-blanked source square is RESTORED — the old bare state-clear
+        // is what deleted a merely-touched piece from the board.
+        releaseGrab();
     }
     if (isDragging) {
         // fix C: complete the drop and emit the move right here in the
@@ -602,6 +628,18 @@ canvas.onmouseup = (e) => {
     }
     lastMouseDownPx = null;
 }
+
+// USER-BUGHUNT (2026-11-23): releasing the button OUTSIDE the canvas fired no
+// canvas.onmouseup at all — is_mouse_down stayed true, the grab stayed live
+// (piece off the board, sprite stuck at the last position) until the next
+// interaction. Window-level safety net: by the time the event bubbles here a
+// canvas-handled drop/click has already released the grab, so releaseGrab()
+// is a no-op for every canvas-finished interaction; it only heals the
+// outside-the-canvas release.
+window.addEventListener('mouseup', () => {
+    is_mouse_down = false;
+    releaseGrab();
+});
 
 canvas.ontouchstart = (e) => {
     is_mouse_down = true;
@@ -629,9 +667,9 @@ canvas.ontouchend = (e) => {
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
             executeClickToMove(j, i);
         }
-        // same grab-state release as the mouseup click path (see BUGFIX there)
-        is_holding_piece = false;
-        holding_piece = 0;
+        // same grab-state release as the mouseup click path (restore via
+        // releaseGrab — see USER-BUGHUNT there)
+        releaseGrab();
     }
     if (isDragging) {
         // fix C: same event-driven drop + emit as mouseup
