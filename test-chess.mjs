@@ -72,6 +72,11 @@ async function test() {
   await sleep(500);
   
   if (matchId !== null) pass('Match created'); else fail('Match created', 'null');
+
+  // T30: match ids are opaque random 8-char a-z0-9 strings (were sequential integers).
+  if (matchId !== null && /^[a-z0-9]{8}$/.test(matchId))
+    pass('T30: public match id format /^[a-z0-9]{8}$/ (' + matchId + ')');
+  else fail('T30: public match id format', `got ${JSON.stringify(matchId)}`);
   
   // === Верные координаты ===
   // White pieces: y=7 (rank 1), y=6 (rank 2)
@@ -207,10 +212,19 @@ async function test() {
   privB.on('startGame', (c, m) => { privColors[1] = c; privIdSeen = m; });
   privA2.on('startGame', (c, m) => { privColors[2] = c; privId2 = m; });
 
+  // T30: the client-supplied argument is IGNORED by the server — the id always
+  // comes from the 'private-match' ECHO. We still pass a (deliberately wrong)
+  // integer to prove the server does not adopt the client's value.
   privA.emit('private-match', 1);
   await new Promise(r => { privA.once('private-match', r); sleep(3000); });
   if (privMatchId != null) pass('Private: link generated (matchId ' + privMatchId + ')');
   else fail('Private: link generated', 'no matchId');
+  if (privMatchId != null && /^[a-z0-9]{8}$/.test(privMatchId))
+    pass('T30: private match id format /^[a-z0-9]{8}$/ (from echo, not client arg)');
+  else fail('T30: private match id format', `got ${JSON.stringify(privMatchId)}`);
+  if (privMatchId != null && String(privMatchId) !== '1')
+    pass('T30: client-supplied id (1) ignored — server generated its own');
+  else fail('T30: client-supplied id ignored', `echo was ${JSON.stringify(privMatchId)}`);
 
   privB.emit('auth', null, privMatchId);
   await sleep(300);
@@ -238,6 +252,48 @@ async function test() {
   if (!privB2) pass('Private: bogus matchId -> no startGame');
   else fail('Private: bogus matchId -> no startGame', 'got startGame');
   privGhost.disconnect();
+
+  // T30 regressions: id is now an OPAQUE STRING.
+  // (a) uppercase id (wrong case) is refused — the pool holds lowercase only.
+  // (b) wrong-length id is refused.
+  // (c) a STALE INTEGER id (old clients keep numeric ids in storage) must fail
+  //     gracefully: no startGame, no authFailed, no server crash — the next
+  //     check (reconnect -> gameNotFound) proves the server is still alive.
+  if (privMatchId !== null) {
+    for (const [label, bad] of [['uppercase', privMatchId.toUpperCase()], ['wrong-length', privMatchId.slice(0, 5)]]) {
+      const ghost = io(BASE, { transports: ['websocket'] });
+      await Promise.race([new Promise(r => ghost.on('connect', r)), sleep(3000)]);
+      let ghostStart = false;
+      ghost.on('startGame', () => { ghostStart = true; });
+      ghost.emit('auth', null, bad);
+      await sleep(300);
+      if (!ghostStart) pass('T30: join with ' + label + ' id ("' + bad + '") refused (no startGame)');
+      else fail('T30: join with ' + label + ' id refused', 'got startGame');
+      ghost.disconnect();
+    }
+    const stale = io(BASE, { transports: ['websocket'] });
+    await Promise.race([new Promise(r => stale.on('connect', r)), sleep(3000)]);
+    let staleStart = false, staleAuthFailed = false;
+    stale.on('startGame', () => { staleStart = true; });
+    stale.on('authFailed', () => { staleAuthFailed = true; });
+    stale.emit('auth', null, 42); // integer — no pool entry "42" can exist pre-existing
+    await sleep(300);
+    if (!staleStart && !staleAuthFailed)
+      pass('T30: stale INTEGER id via auth (guest) — no startGame, no authFailed, no crash');
+    else fail('T30: stale integer id graceful', `start=${staleStart} authFailed=${staleAuthFailed}`);
+    // (d) stale integer id on RECONNECT must land on gameNotFound (not throw).
+    let staleNotFound = false, staleRecon = false;
+    stale.on('gameNotFound', () => { staleNotFound = true; });
+    stale.on('reconnected', () => { staleRecon = true; });
+    stale.emit('reconnect', { gameId: 42, color: 0, sessionID: null, prevSocketId: null });
+    await sleep(300);
+    if (staleNotFound && !staleRecon)
+      pass('T30: stale integer id via reconnect -> gameNotFound (graceful)');
+    else fail('T30: stale integer id reconnect graceful', `notFound=${staleNotFound} recon=${staleRecon}`);
+    stale.disconnect();
+  } else {
+    fail('T30: stale/invalid id rows', 'no privMatchId to derive from');
+  }
   privA.disconnect();
   privB.disconnect();
   privA2.disconnect();
@@ -554,7 +610,9 @@ async function test() {
   r2.on('replay', m => { rReplay2 = m; });
   r1.emit('auth', null, null);
   r2.emit('auth', null, null);
-  await sleep(500);
+  // hardened 500 -> 1200 (same load-flake class as the guest seating wait:
+  // parallel headless e2e inflates the seat round-trip -> rMatch stays null).
+  await sleep(1200);
 
   if (rMatch !== null) {
     // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
@@ -789,6 +847,136 @@ async function test() {
       pass('B6: expired session pruned from sessions.json on next persist (re-signin)');
     else fail('B6: expired session pruned from file', `r=${b6r2}, still in file=${loadSessionsFile().some(e => e.id === b6ExpiredId)}`);
     fs.rmSync(b6UsersCsv, { force: true });
+  }
+
+  // === T30 (TASK 2): seat 'elo' payload for registered players ===
+  // Contract under test: whenever a socket with an authenticated REGISTERED
+  // user is seated into a match, the server emits 'elo' to THAT socket with
+  // { own, rated, opponent } — rated=true only if the opponent is ALSO
+  // registered; opponent = opponent's elo when rated, else null.
+  // Phase 1: guest G joins match #1 first (no seat-elo for guests), then
+  //          U (registered) joins -> rated=false, opponent=null.
+  // Phase 2: FRESH match #2: fresh guest G2 joins first (again no seat-elo —
+  //          guests never get one), U2 (registered) joins -> rated=false.
+  //          (Separate match because B3 ends match #1 immediately when U
+  //          disconnects pre-start, so the dead id must not be reused.)
+  // Phase 3: match #3: U (player1) vs U2 (player2), BOTH registered ->
+  //          both rated=true, opponent = the other's own (reciprocal).
+  // The end-of-game 'elo' payload ({ player1, player2 }) is a DIFFERENT shape,
+  // asserted in the F2 rows above, and must stay byte-compatible for old clients.
+  {
+    const seU = io(BASE, { transports: ['websocket'] });
+    const seG = io(BASE, { transports: ['websocket'] });
+    const seU2 = io(BASE, { transports: ['websocket'] });
+    const seU3 = io(BASE, { transports: ['websocket'] });
+    const seG2 = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => seU.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => seG.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => seU2.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => seU3.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => seG2.on('connect', r)), sleep(3000)])
+    ]);
+    const seU1name = 'seat1_' + Date.now(), seU2name = 'seat2_' + Date.now(), seU3name = 'seat3_' + Date.now();
+    seU.emit('signup', { username: seU1name, password: 'spw1' });
+    seU2.emit('signup', { username: seU2name, password: 'spw2' });
+    seU3.emit('signup', { username: seU3name, password: 'spw3' });
+    await sleep(150);
+    const seU1s = await new Promise(r => { seU.once('signin', (ok, s) => r(s)); seU.emit('signin', { username: seU1name, password: 'spw1' }); setTimeout(() => r(null), 3000); });
+    const seU2s = await new Promise(r => { seU2.once('signin', (ok, s) => r(s)); seU2.emit('signin', { username: seU2name, password: 'spw2' }); setTimeout(() => r(null), 3000); });
+    const seU3s = await new Promise(r => { seU3.once('signin', (ok, s) => r(s)); seU3.emit('signin', { username: seU3name, password: 'spw3' }); setTimeout(() => r(null), 3000); });
+    if (!(seU1s && seU2s && seU3s)) fail('T30 seat-elo: signup/signin for all users', `s1=${seU1s} s2=${seU2s} s3=${seU3s}`);
+
+    const u1Elos = [];
+    seU.on('elo', d => { u1Elos.push(d); });
+    let guestEloSeen = null, u2SeatElo = null;
+    seG.on('elo', d => { guestEloSeen = guestEloSeen || d; });
+    seG2.on('elo', d => { guestEloSeen = guestEloSeen || d; });
+    seU2.on('elo', d => { u2SeatElo = d; });
+
+    // Phase 1: U creates match #1; guest G joins FIRST (no seat-elo for
+    // guests), then U (registered) joins -> rated=false, opponent=null.
+    let seMatch1 = null, seMatch2 = null, seMatch3 = null;
+    seU.on('private-match', (id) => { if (seMatch1 === null) { seMatch1 = id; seG.emit('auth', null, id); } });
+    seU3.on('private-match', (id) => {
+      if (seMatch2 === null) { seMatch2 = id; seG2.emit('auth', null, id); }
+      else if (seMatch3 === null) { seMatch3 = id; seU.emit('auth', seU1s, id); }
+    });
+    seU.emit('private-match', null);
+    await Promise.race([new Promise(r => seU.once('private-match', r)), sleep(3000)]);
+    await sleep(700);
+    if (guestEloSeen === null)
+      pass('T30 seat-elo: guest seated FIRST gets no seat-elo emission');
+    else fail('T30 seat-elo: guest should get no seat elo', JSON.stringify(guestEloSeen));
+
+    if (seU1s) seU.emit('auth', seU1s, seMatch1);
+    await sleep(1000);
+    const seatUnrated = u1Elos[0];
+    if (seatUnrated && typeof seatUnrated.own === 'number' && seatUnrated.rated === false && seatUnrated.opponent === null)
+      pass('T30 seat-elo: registered vs guest -> { own: ' + seatUnrated.own + ', rated: false, opponent: null }');
+    else fail('T30 seat-elo: registered-vs-guest shape', JSON.stringify(u1Elos));
+
+    // Phase 2: FRESH match #2 (B3 ends match #1 on a pre-start disconnect,
+    // so its id is dead — a fresh match is required). U3 (connected) creates
+    // match #2, then G (match #1's player1) disconnects — the B3 rule ends
+    // match #1. G is the one who disconnects (NOT U): U must stay CONNECTED
+    // for phase 3, because a disconnected socket's packets are dropped
+    // server-side and U's phase-3 join (echo-triggered) would never arrive.
+    // G got no seat-elo payload (guests get none), so losing it costs nothing.
+    seU3.emit('private-match', null);
+    await Promise.race([new Promise(r => seU3.once('private-match', r)), sleep(3000)]);
+    seG.disconnect();
+    await sleep(300);
+    await sleep(700);
+    if (seU2s) seU2.emit('auth', seU2s, seMatch2);
+    await sleep(1000);
+    if (u2SeatElo && typeof u2SeatElo.own === 'number' && u2SeatElo.rated === false && u2SeatElo.opponent === null)
+      pass('T30 seat-elo: registered (U2) vs fresh guest -> rated: false, opponent: null');
+    else fail('T30 seat-elo: U2-vs-fresh-guest shape', JSON.stringify(u2SeatElo));
+    if (guestEloSeen === null)
+      pass('T30 seat-elo: fresh guest seated first gets no seat-elo emission (both phases)');
+    else fail('T30 seat-elo: fresh guest should get no seat elo', JSON.stringify(guestEloSeen));
+
+    // Phase 3: registered vs REGISTERED — U3 (creator) shares match #3's
+    // link without seating; U joins first (player1 — at U's seating the
+    // opponent slot is still empty, so U's own payload reads rated:false and
+    // is NOT the rated pair), U2 joins second (player2) -> BOTH seated sockets
+    // get rated=true with opponent = the other player's own elo (reciprocal).
+    // Join order must be DETERMINISTIC (U before U2): the echo triggers U's
+    // auth synchronously, while U2's auth is a separate emit that would race
+    // the server queue — if U2 got queued first, both payloads read
+    // rated:false (opponent not yet registered at each one's seating).
+    // Gate: U2 joins only after U's phase-3 payload (the rated:false one,
+    // emitted at U's seating) has been received.
+    seU3.emit('private-match', null);
+    await Promise.race([new Promise(r => seU3.once('private-match', r)), sleep(3000)]);
+    const u1CountAtP3Start = u1Elos.length;
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (u1Elos.length > u1CountAtP3Start) { clearInterval(t); r(); }
+      }, 50);
+      setTimeout(() => { clearInterval(t); r(); }, 3000);
+    });
+    await sleep(200); // margin: U's socket is seated before U2's auth lands
+    if (seU2s) seU2.emit('auth', seU2s, seMatch3);
+    await sleep(1000);
+    const u1Rated = u1Elos[u1Elos.length - 1];
+    const u2Rated = u2SeatElo; // u2SeatElo holds U2's LATEST emission (the phase-3 one)
+    if (u1Rated && u1Rated !== seatUnrated && typeof u1Rated.own === 'number' && u1Rated.rated === true &&
+        typeof u1Rated.opponent === 'number' && u2Rated && u2Rated !== u1Rated && u2Rated.rated === true &&
+        u1Rated.opponent === u2Rated.own && u2Rated.opponent === u1Rated.own)
+      pass('T30 seat-elo: registered vs registered -> both rated: true, opponent=<other elo> (reciprocal)');
+    else fail('T30 seat-elo: registered-vs-registered reciprocal', `u1=${JSON.stringify(u1Elos)} u2=${JSON.stringify(u2Rated)}`);
+
+    // Shape discipline: seat payloads must NOT carry the game-end keys (the
+    // client disambiguates the two 'elo' payload shapes by keys).
+    const cleanShape = d => d && typeof d.own === 'number' && typeof d.rated === 'boolean' &&
+      ('opponent' in d) && !('player1' in d) && !('player2' in d);
+    if (seatUnrated && cleanShape(seatUnrated) && u1Rated && cleanShape(u1Rated) && u2Rated && cleanShape(u2Rated))
+      pass('T30 seat-elo: seat payloads carry own/rated/opponent ONLY (no player1/player2)');
+    else fail('T30 seat-elo: payload key discipline', JSON.stringify({ u1: seatUnrated, rated1: u1Rated, u2: u2Rated }));
+
+    seG.disconnect(); seG2.disconnect(); seU.disconnect(); seU2.disconnect(); seU3.disconnect();
   }
 
   // === F3: lastMove sync — opponent learns the server-authoritative lastMove ===

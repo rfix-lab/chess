@@ -122,9 +122,12 @@ socket.on('private-match', matchId => {
 
   let linkDiv = document.getElementById('generated-link'); 
 
-  let url = window.location.host + '/game?matchId=' + matchId;
+  // BUGFIX: location.host has no scheme ("mycheserv.duckdns.org") -> the browser
+  // treated href/url as RELATIVE -> /mycheserv.duckdns.org/game = "Cannot GET".
+  // location.origin includes the scheme (https://mycheserv.duckdns.org).
+  let url = window.location.origin + '/game?matchId=' + matchId;
 
-  linkDiv.innerHTML = url;
+  linkDiv.textContent = url;
   linkDiv.href = url;
 
   linkDiv.classList.remove('hide');

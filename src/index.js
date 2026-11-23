@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, rook, bishop, knight, queen, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
-import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers } from './lib/matchmaking.js';
+import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers, genMatchId, setSeatHook } from './lib/matchmaking.js';
 import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, loadSessionsFile, attachSessionsToUsers, START_ELO } from './lib/auth.js';
 import { log as dlog } from './lib/debuglog.js';
 
@@ -162,6 +162,28 @@ function endMatch(match, reason, lostColor) {
   }
 }
 
+// T30 (TASK 2): seat 'elo' payload — sent to a SINGLE socket when a registered
+// player is seated into a match (both startGame emissions via the matchmaking
+// seat hook, and a successful 'reconnect' into an existing match). Shape:
+//   { own: <their current elo>, rated: <true only if the opponent is also a
+//     registered player>, opponent: <opponent elo when rated, else null> }
+// The end-of-game 'elo' emission in endMatch is a DIFFERENT shape
+// ({ player1, player2 }) and is kept as-is for backward compatibility; clients
+// distinguish the two by keys (typeof d.player1 === 'number' => game-end).
+function emitSeatElo(socket, match) {
+  const me = socket.data && socket.data.user;
+  if (!me) return; // guests: no seat elo (mirrors the endMatch rated gate)
+  const oppSocket = match.player1Socket === socket ? match.player2Socket : match.player1Socket;
+  const opp = oppSocket && oppSocket.data && oppSocket.data.user;
+  const rated = !!(oppSocket && opp);
+  socket.emit('elo', {
+    own: (Number(me.elo) || START_ELO),
+    rated: rated,
+    opponent: rated ? (Number(opp.elo) || START_ELO) : null
+  });
+}
+setSeatHook(emitSeatElo);
+
 // express server
 const PORT = process.env.PORT || 5500;
 const app = express();
@@ -214,8 +236,10 @@ app.get('/api/users', (req, res) => {
 
 app.get('/game', (req, res) => {
   let matchId = req.query.matchId;
-  // Validate matchId is a non-negative integer to prevent XSS
-  if (matchId !== undefined && matchId !== '' && (!Number.isInteger(Number(matchId)) || Number(matchId) < 0)) {
+  // T30: match ids are opaque 8-char a-z0-9 strings (was: non-negative integer).
+  // Loose bound (1..32) instead of exactly 8 — old clients may hold other formats;
+  // a non-matching id simply fails the pool lookup (no XSS through the ejs view).
+  if (matchId !== undefined && matchId !== '' && !/^[a-z0-9]{1,32}$/.test(matchId)) {
     return res.status(400).send('Invalid matchId');
   }
   res.render('game', {
@@ -240,8 +264,15 @@ io.on('connection', socket => {
   }
   dlog('socket connect: id=', socket.id, 'sessionCookie=', sidMatch ? 'yes' : 'no', 'username=', connUsername || 'guest');
 
+  // T30: helper to normalize a client-supplied id to the string the pool stores.
+  // Old clients (pre-T30) hold INTEGER ids from sessionStorage/localStorage; String()
+  // keeps them comparable with ===, and a stale numeric id simply misses the pool
+  // (gameNotFound / no-match path) instead of crashing.
+  const normId = (id) => (id === null || id === undefined ? id : String(id));
+
   // this route validates a move sent by a player
   socket.on('move', (matchId, fromCoords, toCoords) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 10 moves per second
@@ -439,6 +470,8 @@ io.on('connection', socket => {
 
   // this route authenticates a user with a sessionID
   socket.on('auth', (sessionID, matchId) => {
+    // T30: URL query values (?matchId=...) arrive as strings; normalize anyway.
+    matchId = normId(matchId);
     // F2: remember who this socket is (null for guests) so endMatch can
     // decide whether the game is rated.
     socket.data.user = null;
@@ -468,6 +501,7 @@ io.on('connection', socket => {
 
   // reconnect: player reloads page and wants to rejoin their game with the same color
   socket.on('reconnect', ({ gameId, color, sessionID, prevSocketId }) => {
+    gameId = normId(gameId);
     const match = matches.find(m => m.matchId === gameId);
     if (!match) {
       dlog('reconnect: gameNotFound reason=no-such-match gameId=', gameId);
@@ -542,19 +576,21 @@ io.on('connection', socket => {
 
     socket.emit('reconnected', color, gameId, cleanBoard, match.turnState, match.lastMove);
     dlog('reconnect: OK socket=', socket.id, 'gameId=', gameId, 'color=', color);
+    // T30 (TASK 2): a registered player who just re-seated into their game gets the
+    // seat 'elo' payload ({ own, rated, opponent }) for that socket (see emitSeatElo).
+    emitSeatElo(socket, match);
   });
 
   // this route generates a private match on demand
   socket.on('private-match', arg => {
-    // generate link here and init new match
-    let maxMatchId = -1;
-    for(let match of matches) {
-      if (match.matchId > maxMatchId) {
-        maxMatchId = match.matchId;
-      }
-    }
+    // T30: the client-supplied argument is IGNORED (old clients passed an integer);
+    // the server always generates the id itself. The echo keeps the contract the
+    // clients already rely on (one argument = the id string): lobby link building
+    // and test/e2e-client.mjs read the id from this event.
+    void arg;
+    const newId = genMatchId();
 
-    let privateMatch = initMatch(maxMatchId + 1, null);
+    let privateMatch = initMatch(newId, null);
     privateMatch.private = true;
 
     matches.push(privateMatch);
@@ -565,6 +601,7 @@ io.on('connection', socket => {
 
   // Handle promotion piece selection
   socket.on('promotion:choose', (data) => {
+    data.gameId = normId(data.gameId);
     const match = matches.find(m => m.matchId === data.gameId);
     if (!match || !match.pendingPromotion) {
       dlog('promotion:choose: REJECTED (no pending promotion) gameId=', data && data.gameId, 'match=', !!match, 'pending=', !!(match && match.pendingPromotion));
@@ -669,6 +706,7 @@ io.on('connection', socket => {
 
   // Draw offer
   socket.on('drawOffer', (matchId) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
     if (!match || match.gameEnded) return;
 
@@ -687,6 +725,7 @@ io.on('connection', socket => {
 
   // Draw response (accept or decline)
   socket.on('drawResponse', (matchId, accepted) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
     if (!match || !match.drawOffered || match.drawOffered === 'declined') return;
 
@@ -706,6 +745,7 @@ io.on('connection', socket => {
 
   // Resign
   socket.on('resign', (matchId) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
     if (!match || match.gameEnded) return;
 
@@ -725,6 +765,7 @@ io.on('connection', socket => {
 
   // Challenge to resign
   socket.on('challenge', (matchId) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 3 challenges per 10 seconds
@@ -746,6 +787,7 @@ io.on('connection', socket => {
 
   // Challenge response
   socket.on('challengeResponse', (matchId, accepted) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
     if (!match || !match.challengeFrom || match.challengeFrom === 'declined') return;
 
@@ -766,6 +808,7 @@ io.on('connection', socket => {
 
   // Takeback request
   socket.on('takebackRequest', (matchId) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
 
     // Rate limit: max 5 takeback requests per 10 seconds
@@ -798,6 +841,7 @@ io.on('connection', socket => {
 
   // Takeback response (accept or decline)
   socket.on('takebackResponse', (matchId, accepted) => {
+    matchId = normId(matchId);
     const match = matches.find(m => m.matchId === matchId);
     if (!match || !match.takebackOffered || match.takebackOffered === 'declined') return;
 

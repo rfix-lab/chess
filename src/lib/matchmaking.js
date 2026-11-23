@@ -8,9 +8,40 @@
     private
   }
 */
+import { randomInt } from 'node:crypto';
 import { log } from './debuglog.js';
 
 export let matches = [];
+
+// T30 (TASK 2): hook called right after the startGame emissions in startMatch with
+// (socket, match) for EACH seated socket. index.js sets it to emit the seat 'elo'
+// payload ({ own, rated, opponent }) to registered players. Kept here (not in
+// index.js) so both the public and private seating paths reach it via startMatch.
+export let seatHook = null;
+export function setSeatHook(fn) { seatHook = fn; }
+
+// T30: match ids are opaque 8-char random strings (alphabet a-z0-9, 36^8 ≈ 2.8e12
+// combinations — collision probability is negligible, but genMatchId still checks
+// the whole pool and regenerates on a hit, so an id is never a guess).
+const MATCH_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const MATCH_ID_ALPHABET_SIZE = 36;
+export const MATCH_ID_LENGTH = 8;
+
+export function genMatchId() {
+  let id = '';
+  for (let i = 0; i < MATCH_ID_LENGTH; i++) {
+    id += MATCH_ID_ALPHABET[randomInt(MATCH_ID_ALPHABET_SIZE)];
+  }
+  // Collision check over the WHOLE pool (private + public); regenerate on hit.
+  while (matches.some(m => m.matchId === id)) {
+    id = '';
+    for (let i = 0; i < MATCH_ID_LENGTH; i++) {
+      id += MATCH_ID_ALPHABET[randomInt(MATCH_ID_ALPHABET_SIZE)];
+    }
+    log('genMatchId: collision on', id, '— regenerated (pool=', matches.length, ')');
+  }
+  return id;
+}
 
 // Remove a match from the pool by object reference (NOT by index — matchIds are not array
 // indices; see docs/archive/errors/02.err). No-op if the match is already gone.
@@ -80,13 +111,10 @@ export function findMatch(playerSocket) {
       return i;
     }
   }
-  // next unique id — matches.length is NOT safe after splice (completed matches get removed)
-  let maxId = -1;
-  for (const m of matches) {
-    if (m.matchId > maxId) maxId = m.matchId;
-  }
-  matches.push(initMatch(maxId + 1, playerSocket));
-  log('matchmaking findMatch: no open slot, created new match matchId=', maxId + 1, 'pool=', matches.length);
+  // T30: opaque random id (was maxId+1 — numeric comparison is gone, id is opaque).
+  const newId = genMatchId();
+  matches.push(initMatch(newId, playerSocket));
+  log('matchmaking findMatch: no open slot, created new match matchId=', newId, 'pool=', matches.length);
   return matches.length - 1;
 }
 
@@ -123,4 +151,9 @@ function startMatch(id) {
   log('matchmaking startMatch: both seated, emitting startGame matchId=', id);
   m.player1Socket.emit('startGame', 0, id);
   m.player2Socket.emit('startGame', 1, id);
+  // T30 (TASK 2): seat 'elo' payload for registered players (index.js's hook).
+  if (seatHook) {
+    seatHook(m.player1Socket, m);
+    seatHook(m.player2Socket, m);
+  }
 }

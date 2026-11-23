@@ -6,6 +6,7 @@ const canvas = document.getElementById("cnv");
 const ctx = canvas.getContext('2d');
 
 var dark_square_color = '#55648a';
+var label_color = '#eef2f9'; // board rank/file labels — synced to --text by updateBoardColors
 var light_square_color = '#e9eef6';
 const move_square_color = '#7af4ae';
 const possible_move_color = '#74f551';
@@ -104,19 +105,28 @@ const selected_square_opacity = 0.5;
 
 let sprites = [];
 sprites[blank] = ' ';
-sprites[white | pawn] = '♙';
-sprites[white | king] = '♔';
-sprites[white | queen] = '♕';
-sprites[white | rook] = '♖';
-sprites[white | bishop] = '♗';
-sprites[white | knight] = '♘';
+// USER-FACING RENDERING FIX (2026-11-23): the OUTLINE glyphs (U+2654-59) the
+// white side used to map to are hollow: on canvas the square color shows
+// through the interior — on dark squares white pieces looked "transparent /
+// nearly black". Both colors now use the SOLID glyph set (U+265A-5F); the
+// color distinction is done at draw time (white pieces: white fill + dark
+// stroke, see render_board). '\uFE0E' (text variation selector) forces a text
+// glyph on platforms that otherwise render chess symbols as COLOR EMOJI
+// (Android/macOS), which would ignore fillStyle entirely.
+const VS15 = '\uFE0E';
+sprites[white | pawn] = '♟' + VS15;
+sprites[white | king] = '♚' + VS15;
+sprites[white | queen] = '♛' + VS15;
+sprites[white | rook] = '♜' + VS15;
+sprites[white | bishop] = '♝' + VS15;
+sprites[white | knight] = '♞' + VS15;
 
-sprites[black | pawn] = '♟︎';
-sprites[black | king] = '♚';
-sprites[black | queen] = '♛';
-sprites[black | rook] = '♜';
-sprites[black | bishop] = '♝';
-sprites[black | knight] = '♞';
+sprites[black | pawn] = '♟' + VS15;
+sprites[black | king] = '♚' + VS15;
+sprites[black | queen] = '♛' + VS15;
+sprites[black | rook] = '♜' + VS15;
+sprites[black | bishop] = '♝' + VS15;
+sprites[black | knight] = '♞' + VS15;
 
 let board = [
   [12, 14, 13, 11, 10, 13, 14, 12],
@@ -178,20 +188,39 @@ function fen_to_board(fen) {
     board = new_board;
 }
 
-// Draws the pieces and pawns
+// Draws the pieces and pawns.
+// Both colors use the SOLID glyph set now (see sprites): white pieces are
+// painted white with a dark outline (a bare outline glyph was invisible on
+// dark squares), black pieces dark with a subtle light outline.
+function drawPieceGlyph(glyph, isWhite, gx, gy) {
+    if (isWhite) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(glyph, gx, gy);
+        ctx.strokeStyle = 'rgba(20, 26, 38, 0.9)';
+    } else {
+        ctx.fillStyle = '#141a26';
+        ctx.fillText(glyph, gx, gy);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    }
+    ctx.strokeText(glyph, gx, gy);
+}
+
 function render_board() {
     let side_len_square = side_len / no_of_squares;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = Math.floor(side_len_square * 0.75) + 'px sans-serif';
+    ctx.lineJoin = 'round';
+    // OUTLINE WEIGHT (user bughunt 2026-11-23): 0.045 produced a ~3px halo on
+    // 64px cells — 2.5x too thick. 0.018 keeps the glyph edge readable.
+    ctx.lineWidth = Math.max(0.5, side_len_square * 0.018);
     for (let i = 0; i < no_of_squares; i++) {
         for (let j = 0; j < no_of_squares; j++) {
-            ctx.fillStyle = 'black';
-            ctx.fillText(
-                sprites[board[i][j] & (0b1111)],
+            const v = board[i][j] & 0b1111;
+            if (v === blank) continue; // strip indicators; empty needs no glyph
+            drawPieceGlyph(sprites[v], (v & black) === 0,
                 offset_x + j * side_len_square + side_len_square / 2,
-                offset_y + i * side_len_square + side_len_square / 2
-            );
+                offset_y + i * side_len_square + side_len_square / 2);
         }
     }
     ctx.textAlign = 'start';
@@ -223,54 +252,53 @@ function draw() {
                 ctx.fillStyle = check_square_color;
             }
 
-            ctx.fillRect(offset_x + i * side_len_square,
-                offset_y + j * side_len_square,
+            ctx.fillRect(offset_x + j * side_len_square,
+                offset_y + i * side_len_square,
                 side_len_square, side_len_square);
 
             // Click-to-move: selected square highlight
+            // PIXEL TRANSPOSITION FIX (2026-11-23, user bughunt): every fillRect
+            // here used x=i, y=j while pieces (render_board), pixelToSquare and
+            // the board convention board[y][x] all use x=j, y=i. Result: every
+            // overlay (last-move/check/en-passant squares, selection, legal-move
+            // tints) rendered mirrored across the main diagonal while the JS
+            // state was correct — invisible to state-reading tests, glaring in
+            // the browser. Geometry only change; keys/conditions untouched.
             if (selectedSquare && j === selectedSquare.x && i === selectedSquare.y) {
                 ctx.globalAlpha = selected_square_opacity;
                 ctx.fillStyle = selected_square_color;
-                ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
+                ctx.fillRect(offset_x + j * side_len_square, offset_y + i * side_len_square, side_len_square, side_len_square);
                 ctx.globalAlpha = 1.0;
             }
             // Click-to-move: legal move indicators
             if (legalMoveSquares.has(j + ',' + i)) {
                 ctx.globalAlpha = 0.3;
                 ctx.fillStyle = possible_move_color;
-                ctx.fillRect(offset_x + i * side_len_square, offset_y + j * side_len_square, side_len_square, side_len_square);
+                ctx.fillRect(offset_x + j * side_len_square, offset_y + i * side_len_square, side_len_square, side_len_square);
                 ctx.globalAlpha = 1.0;
             }
         }
     }
     // Display the rank and file numbers and letters
-
-    // write the numbers (1 - 8 ranks)
-    ctx.fillStyle = 'black'
+    // THEME-AWARE (2026-11-23 fix): labels used to be drawn in 'black' on a
+    // 10px margin — invisible on the dark theme and half-clipped off-canvas.
+    // They now use the theme text color (label_color, refreshed by
+    // updateBoardColors) and sit CENTERED inside the layout.OFFSET margins.
+    const cell = side_len_square;
+    ctx.fillStyle = label_color;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     for (let i = 0; i < no_of_squares; i++) {
-        ctx.font = '15px sans-serif';
-        if (my_color == 0) {
-            ctx.fillText(8 - i, offset_x / 3,
-                offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
-        } else {
-            ctx.fillText(1 + i, offset_x / 3,
-                offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
-        }
+        // ranks: left margin, vertical center of each row
+        ctx.fillText(my_color == 0 ? String(8 - i) : String(1 + i),
+            offset_x / 2, offset_y + (i + 0.5) * cell);
+        // files: bottom margin, horizontal center of each column
+        ctx.fillText(my_color == 0 ? String.fromCharCode(97 + i) : String.fromCharCode(104 - i),
+            offset_x + (i + 0.5) * cell, offset_y + side_len + offset_y / 2);
     }
-
-    // write the letters (a - h files)
-    for (let i = 0; i < no_of_squares; i++) {
-        ctx.font = '15px sans-serif';
-        if (my_color == 0) {
-            ctx.fillText(String.fromCharCode(97 + i),
-                offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
-                offset_y * 1.1 + side_len + 10);
-        } else {
-            ctx.fillText(String.fromCharCode(104 - i),
-                offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
-                offset_y * 1.1 + side_len + 10);
-        }
-    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
 }
 
 // get_box_coords -> layout.pixelToSquare: canvas px -> visual square.
@@ -369,10 +397,36 @@ function grabDragPiece(px, py) {
     let i = pos.y, j = pos.x;
     if ((board[i][j] & 0b1111) === 0)
         return;
+    // USER-BUGHUNT FIX (2026-11-23): grabbing an OPPONENT piece blanked its
+    // square just the same (the render loop clears from_position while a grab
+    // is active) — "touching any piece makes it disappear". Only our own
+    // pieces may be grabbed; the click-to-move path handles enemy squares.
+    if (getVisualPieceColor(board[i][j]) !== my_color)
+        return;
     // set the holding piece to whatever is on that square
     is_holding_piece = true;
-    holding_piece = board[i][j];
+    // strip indicator bits (last-move/check/en-passant, >= 0b10000): the held
+    // piece may be RESTORED into the board later (cancel branch / click flow),
+    // and a raw value would plant a piece+indicator ghost square.
+    holding_piece = board[i][j] & 0b1111;
     from_position = { x: j, y: i };
+}
+
+// Shared grab release for every NON-drag end of a grab (click path on
+// mouseup/touchend, window-level mouseup after a drop outside the canvas,
+// cancelled grab in handle_drag). The render loop blanks from_position while
+// a grab is live; clearing is_holding_piece WITHOUT restoring that square
+// deleted the piece off the board array — user complaint "a touched piece
+// disappears" (a quick click kept the grab live across one tick, then the
+// click path dropped the state). Restore only when the square is still the
+// loop-blanked hole: if an authoritative update already refilled it, leave it.
+function releaseGrab() {
+    if (!is_holding_piece) return;
+    if (from_position && board[from_position.y][from_position.x] === blank)
+        board[from_position.y][from_position.x] = holding_piece & 0b1111;
+    is_holding_piece = false;
+    dragSettled = false;
+    holding_piece = 0;
 }
 
 function completeDrag(px, py) {
@@ -408,6 +462,15 @@ function completeDrag(px, py) {
     // value arrives with 'validated' (see sendMoveToServer comment).
     socket.emit('move', matchId, serverFrom, serverTo);
     is_being_validated = true;
+    // USER-BUGHUNT 2 (2026-11-23): dropping on an ILLEGAL square -> server
+    // REJECTS -> the 'validated' rejected branch keeps the client board
+    // untouched, while the render loop had left from_position BLANK in the
+    // array for the whole life of the grab and the cleared grab state never
+    // restores it: the dragged piece simply vanished. Optimistic drawing is
+    // server-driven — restore the source square right at emit; an accepted
+    // move replaces the whole board via 'validated' anyway, so the restored
+    // piece is only visible on the rejection path.
+    board[from_position.y][from_position.x] = holding_piece & 0b1111;
     // The drag is finished HERE. If the holding state lingers, handle_drag()
     // blanks the square under the cursor on its next tick — and once the
     // 'validated' broadcast has replaced the board, that blank wipes the
@@ -444,23 +507,21 @@ function handle_drag() {
         if (is_holding_piece) {
             // if already holding a piece and the mouse is held down,
             // display the held piece at the mouse
-            ctx.fillStyle = 'black';
-            ctx.font = Math.floor(side_len / no_of_squares) * 0.8 + 'px sans serif';
-            let off_x = Math.floor(side_len / no_of_squares) * 0.3;
-            ctx.fillText(sprites[holding_piece], mouse_x - off_x, mouse_y);
+            ctx.font = Math.floor(side_len / no_of_squares) * 0.8 + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = Math.max(0.5, (side_len / no_of_squares) * 0.018);
+            drawPieceGlyph(sprites[holding_piece], (holding_piece & black) === 0,
+                mouse_x, mouse_y);
+            ctx.textAlign = 'start';
+            ctx.textBaseline = 'alphabetic';
         }
     }
     else if (is_holding_piece) {
-        // Reached ONLY for a cancelled grab: the mouse was released outside
-        // the canvas so the mouseup/ontouchend handlers never fired. A
-        // COMPLETED drop is finalized (and its holding state cleared) inside
-        // completeDrag(), so this branch must never mutate the board for it.
-        // Restore the piece on its original square (the render loop blanks
-        // that square while a piece is held).
-        board[from_position.y][from_position.x] = holding_piece;
-        is_holding_piece = false;
-        dragSettled = false;
-        holding_piece = 0;
+        // Cancelled grab: mouse released outside the canvas so no mouseup hit
+        // the canvas. A COMPLETED drop is finalized inside completeDrag().
+        releaseGrab();
     }
 }
 
@@ -486,21 +547,29 @@ function display_possible_moves(){
     let moves = genLegalMoves(new_board, new_from_position, null, lastMove);
     // console.log(moves);
 
-    // For every legal move draw a green circle indicating that
+    // For every legal move draw a green circle indicating that square.
+    // BUGHUNT FIX (2026-11-23): was a 15px '⬤' glyph drawn from the square's
+    // TOP-LEFT with textAlign 'start' and an off_y of offset_y*1.5 — visibly
+    // off-center and size-fixed. Now a centered arc at the true square center
+    // (x=j convention), scaled with the cell.
+    ctx.beginPath();
     for(let m of moves){
         ctx.fillStyle = possible_move_color;
-        ctx.font = '15px sans-serif';
-        let off_x = offset_x + (side_len_square) / 3;
-        let off_y = offset_y * 1.5 + (side_len_square) / 3;
         // rotate the engine target back to visual coordinates
         let t = layout.orientToVisual(m.to.x, m.to.y, my_color);
-        ctx.fillText('⬤', off_x + t.x * side_len_square,
-        off_y + t.y * side_len_square);
-            // ⬤
+        ctx.moveTo(offset_x + t.x * side_len_square + side_len_square / 2 + side_len_square * 0.16, offset_y + t.y * side_len_square + side_len_square / 2);
+        ctx.arc(offset_x + t.x * side_len_square + side_len_square / 2,
+                offset_y + t.y * side_len_square + side_len_square / 2,
+                side_len_square * 0.16, 0, 2 * Math.PI);
     }
+    ctx.fill();
 }
 
 window.onload = () => {
+    // apply the SAVED theme to the canvas colors before the first draw (theme.js
+    // runs before game.js exists, so its load-time updateBoardColors() is a no-op
+    // without this — a saved LIGHT theme used to paint dark-theme squares).
+    updateBoardColors();
     recalcLayout();
     // Only draw the initial board if there's no saved session.
     // If reconnecting, skip draw() here and wait for the 'reconnected' event
@@ -554,6 +623,11 @@ canvas.onmouseup = (e) => {
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
             executeClickToMove(j, i);
         }
+        // BUGFIX (Immortal-game audit): a completed click must leave no grab
+        // state. USER-BUGHUNT (2026-11-23): release via releaseGrab() so the
+        // loop-blanked source square is RESTORED — the old bare state-clear
+        // is what deleted a merely-touched piece from the board.
+        releaseGrab();
     }
     if (isDragging) {
         // fix C: complete the drop and emit the move right here in the
@@ -563,6 +637,18 @@ canvas.onmouseup = (e) => {
     }
     lastMouseDownPx = null;
 }
+
+// USER-BUGHUNT (2026-11-23): releasing the button OUTSIDE the canvas fired no
+// canvas.onmouseup at all — is_mouse_down stayed true, the grab stayed live
+// (piece off the board, sprite stuck at the last position) until the next
+// interaction. Window-level safety net: by the time the event bubbles here a
+// canvas-handled drop/click has already released the grab, so releaseGrab()
+// is a no-op for every canvas-finished interaction; it only heals the
+// outside-the-canvas release.
+window.addEventListener('mouseup', () => {
+    is_mouse_down = false;
+    releaseGrab();
+});
 
 canvas.ontouchstart = (e) => {
     is_mouse_down = true;
@@ -590,6 +676,9 @@ canvas.ontouchend = (e) => {
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
             executeClickToMove(j, i);
         }
+        // same grab-state release as the mouseup click path (restore via
+        // releaseGrab — see USER-BUGHUNT there)
+        releaseGrab();
     }
     if (isDragging) {
         // fix C: same event-driven drop + emit as mouseup
@@ -679,6 +768,7 @@ function updateBoardColors() {
   var root = getComputedStyle(document.documentElement);
   dark_square_color = root.getPropertyValue('--board-dark').trim() || '#4f5969';
   light_square_color = root.getPropertyValue('--board-light').trim() || '#c1c8d4';
+  label_color = root.getPropertyValue('--text').trim() || '#eef2f9';
 }
 
 window.onresize = () => { recalcLayout(); };

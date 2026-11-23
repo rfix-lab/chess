@@ -4,25 +4,50 @@ var socket = io();
 // v4 generates a NEW id, and the server needs the PREVIOUS id to recognize the
 // returning client (socket.io reconnect race: the new connection can arrive
 // before the old socket's 'disconnect' event, so the old one may still be .connected).
+//
+// RECONNECT RE-AUTH (user report 2026-11-23 "opponent's move only visible after
+// refreshing the page"): socket.io transparently re-establishes a dropped WS
+// with a NEW socket id — but the server's match still holds the OLD socket
+// object, so every 'validated' broadcast went to the dead reference. The page
+// looked alive yet received nothing until a manual reload (page load re-runs
+// tryReconnect). Fix: on every RE-connect (not the first one) replay the same
+// handshake the page load would: reconnect into our seated game (with the
+// previous socket id so the server replaces its stale slot), or re-join the
+// lobby when no game was started yet.
+let __firstConnect = true;
 socket.on('connect', () => {
+  let prevSocketId = null;
+  try { prevSocketId = sessionStorage.getItem('cherry_socketId'); } catch (e) {}
   try { sessionStorage.setItem('cherry_socketId', socket.id); } catch (e) {}
+  if (__firstConnect) { __firstConnect = false; return; }
+  // automatic reconnection after a transport drop
+  if (!tryReconnect()) sendCookie();
 });
 
 // --- Session persistence helpers ---
+// SESSIONS ARE PER-TAB (sessionStorage, not localStorage) — user report
+// 2026-11-23: two tabs of the SAME browser (e.g. two guest players on one
+// machine) shared one localStorage key: whichever tab received startGame last
+// overwrote the other's {gameId, color}, so a reload made the OTHER player
+// reconnect with the wrong color into the live player's slot (server: slot
+// occupied -> gameNotFound -> bounced to lobby / desynced seat). sessionStorage
+// survives reloads of its own tab (the reconnect case this is for) but is
+// invisible to the other tab — the correct scope. A brand-new tab now correctly
+// joins the lobby instead of hijacking a seat.
 const SESSION_KEY = 'cherry_session';
 
 function saveSession(gameId, color) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ gameId, color }));
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ gameId, color }));
 }
 
 function loadSession() {
   try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY));
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY));
   } catch { return null; }
 }
 
 function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 // --- Auth / reconnect ---
@@ -31,10 +56,13 @@ function clearSession() {
 sendCookie = () => {
   let sessionID = readCookie('sessionID');
 
-  if (matchId == "")
+  if (matchId === "" || matchId === null || matchId === undefined)
     matchId = null;
   else
-    matchId = Number(matchId);
+    // T30 (2026-11-23): match ids are opaque 8-char strings — the old
+    // Number(matchId) turned them into NaN which the server received as null,
+    // silently dropping private-link players into PUBLIC matchmaking.
+    matchId = String(matchId);
 
   socket.emit('auth', sessionID, matchId);
 };
@@ -297,9 +325,25 @@ socket.on('resignReceived', (data) => {
   } else {
     document.getElementById('status').innerText = `${colorName} resigned. You won! 🎉`;
   }
+  showEndModal('Сдача', document.getElementById('status').innerText);
 });
 
 // --- Incoming: Game end (agreement draw) ---
+// BUGFIX (Immortal-game browser audit): nothing ever opened gameEndModal —
+// every game-over path only rewrote the status line, so the end modal and the
+// F3 replay UI were unreachable. Central opener, used by gameEnd/checkMate/
+// stalemate/draw/resignReceived; display value matches .modal-overlay (flex).
+function showEndModal(title, text) {
+  const modal = document.getElementById('gameEndModal');
+  if (!modal) return;
+  const t = document.getElementById('gameEndTitle');
+  const p = document.getElementById('gameEndText');
+  if (t) t.innerText = title || '';
+  if (p) p.innerText = text || '';
+  modal.style.display = 'flex';
+  if (replayMoves && replayMoves.length) showReplay();
+}
+
 socket.on('gameEnd', (data) => {
   can_move = false;
   gameIsOver = true;
@@ -307,6 +351,7 @@ socket.on('gameEnd', (data) => {
   disableAllGameActions();
   if (!data) {
     document.getElementById('status').innerText = 'Game over';
+    showEndModal('Игра окончена', 'Game over');
     return;
   }
   const messages = {
@@ -325,8 +370,8 @@ socket.on('gameEnd', (data) => {
     document.getElementById('status').innerText += ` (Elo: вы ${myElo}, соперник ${oppElo})`;
   }
   // F3: if the replay is already in hand (or saved from a pre-end receive),
-  // expose it in the end modal.
-  if (replayMoves && replayMoves.length) showReplay();
+  // expose it in the end modal — and OPEN the modal itself.
+  showEndModal('Игра окончена', messages[data.result] || 'Game over');
 });
 
 // --- F3: replay (move history + playback) ---
@@ -406,6 +451,11 @@ function applyReplayPosition(idx) {
     const m = replayMoves[idx - 1];
     if (m && m.fenAfter) fen_to_board(m.fenAfter);
   }
+  // fen_to_board writes SERVER orientation — keep the black-view invariant
+  // (same rule as window.onload / 'validated'): the visual board of a black
+  // player is the 180-degree rotation. Without this, replay/rewind rendered
+  // the black player's board from white's perspective (Immortal audit).
+  if (my_color === 1) board = window.ChessLayout.rotateBoard(board, 1);
   replayIndex = Math.max(0, Math.min(idx, replayMoves.length));
   draw();
   render_board();
@@ -459,8 +509,30 @@ socket.on('replay', (moves) => {
 
 let myElo = null;
 let oppElo = null;
+// Requirement 5 (2026-11-23): registered users always see their internal Elo.
+// Server contract (checkpoint/30): the 'elo' event has TWO payload shapes —
+// SEAT {own, rated, opponent} sent once per seating/reconnect to a REGISTERED
+// socket only, and GAME-END {player1, player2}. Disambiguated by key types.
+let eloOwn = null;
+let eloOpp = null; // opponent's elo, null => unrated pairing (guest)
+function renderEloBadge() {
+  const el = document.getElementById('eloBadge');
+  if (!el) return;
+  if (eloOwn === null) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerText = eloOpp === null
+    ? `Elo: ${eloOwn} — игра с гостем, рейтинг не меняется`
+    : `Elo: ${eloOwn} · соперник: ${eloOpp}`;
+}
 socket.on('elo', (data) => {
-  // player1 = white = color 0, player2 = black = color 1
+  if (data && typeof data.own === 'number') {
+    // SEAT payload
+    eloOwn = data.own;
+    eloOpp = (data.rated && typeof data.opponent === 'number') ? data.opponent : null;
+    renderEloBadge();
+    return;
+  }
+  // player1 = white = color 0, player2 = black = color 1 (game-end payload)
   if (my_color === 0) {
     myElo = data.player1;
     oppElo = data.player2;
@@ -468,6 +540,10 @@ socket.on('elo', (data) => {
     myElo = data.player2;
     oppElo = data.player1;
   }
+  // keep the badge in step with the post-game update
+  eloOwn = myElo;
+  eloOpp = oppElo;
+  renderEloBadge();
 });
 
 // return from server on whether a move was validated or not
@@ -519,6 +595,12 @@ socket.on('validated', (boardState, turnState, extra) => {
   // F3: adopt the server-authoritative lastMove (server coords, same shape as
   // the local one) so EP targets of the opponent's double push are computed.
   if (extra && extra.lastMove) lastMove = extra.lastMove;
+  // Test-harness snapshot: the server-authoritative board in SERVER orientation
+  // with raw indicator bits, immune to the replay browser rewriting the global
+  // board (showReplay -> applyReplayPosition(0) resets it to the start position
+  // the instant the end modal reveals the replay, racing the E2E final-board
+  // assertion). __chessDebug exposes the same global for other probes.
+  window.__lastValidatedRaw = boardState.map(r => r.slice());
   // Clear click-to-move selection after server response
   selectedSquare = null;
   legalMoveSquares.clear();
@@ -549,6 +631,9 @@ socket.on('checkMate', turn => {
   }
   else
     document.getElementById('status').innerText = 'Check Mate you Won! 🎉';
+  // checkmate arrives AFTER gameEnd (server order) — refresh the open modal
+  // with the richer text instead of leaving the generic one.
+  showEndModal('Шах и мат', document.getElementById('status').innerText);
 });
 
 // stalemate (draw)
@@ -558,6 +643,7 @@ socket.on('stalemate', () => {
   clearSession();
   disableAllGameActions();
   document.getElementById('status').innerText = 'Stalemate — Draw! 🤝';
+  showEndModal('Ничья (пат)', 'Stalemate — Draw! 🤝');
 });
 
 // draw (threefold repetition)
@@ -568,6 +654,7 @@ socket.on('draw', (data) => {
   disableAllGameActions();
   if (!data) {
     document.getElementById('status').innerText = 'Ничья! 🤝';
+    showEndModal('Ничья', 'Ничья! 🤝');
     return;
   }
   const reasons = {
@@ -576,6 +663,7 @@ socket.on('draw', (data) => {
     'fifty': 'Ничья — правило 50 ходов! 🤝',
   };
   document.getElementById('status').innerText = reasons[data.reason] || 'Ничья! 🤝';
+  showEndModal('Ничья', document.getElementById('status').innerText);
 });
 
 // Takeback button

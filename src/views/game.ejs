@@ -25,6 +25,9 @@
     <div id="captured-white" class="captured-row"></div>
   </div>
   <h1 id="status">Waiting for player...</h1>
+  <!-- Internal Elo badge (visible only to registered users; the server sends
+       the seat 'elo' event only when socket.data.user exists). -->
+  <div id="eloBadge" class="elo-badge" style="display:none;"></div>
 
   <!-- Game action buttons -->
   <div id="game-actions" class="game-actions" style="display:none;">

@@ -254,14 +254,20 @@ try {
   // `expected` tables.
   const serverOriented = () => `
     (function () {
-      const b = window.__chessDebug.getBoard().map(r => r.slice().map(v => v & 0b1111));
-      return window.ChessLayout.rotateBoard(b, window.__chessDebug.myColor);
+      // prefer the validated snapshot: the end-of-game replay browser rewrites
+      // the global board immediately after mate (applyReplayPosition(0))
+      const src = window.__lastValidatedRaw ||
+        window.__chessDebug.getBoard().map(r => r.slice().map(v => v & 0b1111))
+          .slice();
+      if (window.__lastValidatedRaw) return src.map(r => r.map(v => v & 0b1111));
+      return window.ChessLayout.rotateBoard(src, window.__chessDebug.myColor);
     })()`;
 
   // board on a page in SERVER orientation WITHOUT masking (raw values, so the
   // high indicator bits are intact) — used to read en-passant / check bits.
   const serverOrientedRaw = () => `
     (function () {
+      if (window.__lastValidatedRaw) return window.__lastValidatedRaw.map(r => r.slice());
       const b = window.__chessDebug.getBoard().map(r => r.slice());
       return window.ChessLayout.rotateBoard(b, window.__chessDebug.myColor);
     })()`;
@@ -365,6 +371,94 @@ try {
     .filter(l => l.includes('move: APPLIED') && l.includes('matchId= ' + matchId));
   const rejectedLines = () => serverLog().split('\n')
     .filter(l => l.includes('move: REJECTED') && l.includes('matchId= ' + matchId));
+
+  // ---------- user bughunt 2026-11-23: touch-disappear + highlight transposition ----------
+  {
+    const bAt = (x, y) => white.page.evaluate(({ x, y }) => board[y][x] & 0b1111, { x, y });
+    const holdSt = () => white.page.evaluate(() => ({ hold: is_holding_piece, sel: selectedSquare !== null }));
+
+    // H1: 60ms press on an ENEMY pawn (e7 = server (4,1)) must not remove it.
+    const e7 = await squarePx(white.page, 4, 1);
+    await white.page.mouse.move(e7.x, e7.y);
+    await white.page.mouse.down();
+    await sleep(60);
+    await white.page.mouse.up();
+    await sleep(60);
+    const h1 = await bAt(4, 1);
+    const h1st = await holdSt();
+    logRow('H1 enemy-piece touch (60ms press on e7): piece stays, no grab state',
+      h1 === 9 && !h1st.hold ? 'PASS' : 'FAIL',
+      `board[1][4]=${h1} (want 9), holding=${h1st.hold}`);
+
+    // H2: 60ms press on OWN pawn (e2 = server (4,6)) — the grab tick blanks
+    // the square, release must RESTORE it (old code deleted the piece).
+    const e2 = await squarePx(white.page, 4, 6);
+    await white.page.mouse.move(e2.x, e2.y);
+    await white.page.mouse.down();
+    await sleep(60);
+    await white.page.mouse.up();
+    await sleep(60);
+    const h2 = await bAt(4, 6);
+    const h2st = await holdSt();
+    logRow('H2 own-piece light click (60ms press on e2): piece restored after grab tick',
+      h2 === 1 && !h2st.hold ? 'PASS' : 'FAIL',
+      `board[6][4]=${h2} (want 1), holding=${h2st.hold}`);
+    // clear the click-selection so H3 starts clean
+    if (h2st.sel) {
+      const d6 = await squarePx(white.page, 3, 2);
+      await white.page.mouse.click(d6.x, d6.y);
+      await sleep(60);
+    }
+
+    // H3: pixel probe. Selecting the e2 pawn must tint e3 (4,5) and NOT the
+    // diagonal mirror d4 (5,4) — the old draw() filled rects with x=i,y=j
+    // (transposed) while pieces used x=j; the mirror of a target across the
+    // main diagonal is exactly where the buggy code painted. (e3/d4 are
+    // EMPTY at start: a glyph would hide a tint painted underneath, since
+    // pieces draw on top of the square overlays.) Green-vs-red channel gap
+    // grows ~35 with the 0.3-alpha #74f551 tint on either square colour.
+    const pxAt = (x, y) => white.page.evaluate(({ x, y }) => {
+      const cnv = document.getElementById('cnv');
+      const dpr = window.devicePixelRatio || 1;
+      const cell = side_len / 8;
+      const cx = Math.round((offset_x + x * cell + cell / 2) * dpr);
+      const cy = Math.round((offset_y + y * cell + cell / 2) * dpr);
+      const d = cnv.getContext('2d').getImageData(cx, cy, 1, 1).data;
+      return [d[0], d[1], d[2]];
+    }, { x, y });
+    const grGap = (p) => p[1] - p[0];
+    const e3Before = await pxAt(4, 5);
+    const d4Before = await pxAt(5, 4);
+    const e2b = await squarePx(white.page, 4, 6);
+    await white.page.mouse.click(e2b.x, e2b.y);
+    await sleep(120); // selection tint live from the next draw tick
+    const e3After = await pxAt(4, 5);
+    const d4After = await pxAt(5, 4);
+    const tinted = grGap(e3After) - grGap(e3Before) > 25;
+    const mirrorClean = JSON.stringify(d4Before) === JSON.stringify(d4After);
+    // cleanup: deselect
+    const empty2 = await squarePx(white.page, 3, 2);
+    await white.page.mouse.click(empty2.x, empty2.y);
+    await sleep(60);
+    logRow('H3 selection highlight pixels land on e3, NOT on the transposed mirror d4',
+      tinted && mirrorClean ? 'PASS' : 'FAIL',
+      `e3 ${JSON.stringify(e3Before)}->${JSON.stringify(e3After)} tinted=${tinted}; d4 ${JSON.stringify(d4Before)}->${JSON.stringify(d4After)} clean=${mirrorClean}`);
+
+    // H4: DRAG own pawn e2 onto the ILLEGAL target e5 (blocked) — the server
+    // rejects and the rejected branch keeps the client board, so the piece
+    // must be restored on e2 by completeDrag itself (user report 2026-11-23:
+    // "dragging my piece to an unavailable square makes it disappear").
+    await drive(white.page, toXY('e2'), toXY('e5'), 'drag');
+    await sleep(300); // server REJECTED + shake + rejected validated round-trip
+    const h4Board = await white.page.evaluate(() =>
+      window.__chessDebug.getBoard().map(r => r.slice().map(v => v & 0b1111)));
+    const h4Count = h4Board.flat().filter(v => v !== 0).length;
+    const h4Pawn = h4Board[6][4];
+    const h4Applied = appliedLines().length;
+    logRow('H4 drag own piece to illegal square (e2->e5 drag) -> rejected, piece stays on e2, board intact',
+      h4Pawn === 1 && h4Count === 32 && h4Applied === 0 ? 'PASS' : 'FAIL',
+      `board[6][4]=${h4Pawn} (want 1), pieces=${h4Count} (want 32), appliedLines=${h4Applied} (want 0)`);
+  }
 
   // ---------- E-ill: illegal-move probe (white e2->e5, blocked by own pawn) ----------
   {
