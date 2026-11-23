@@ -10,7 +10,14 @@
    are mapped to the shared tokens here so the theme toggle keeps working
    without touching JS. */
 
+/* contract-37 D-a: single centered game-page column.
+   Header, status pill, captured strips, board canvas and the action bar all
+   share this width so the page is symmetric; on viewports < ~505px it
+   collapses to 95vw (no horizontal scroll). Board canvas JS sizing
+   (layout.js CELL_CAP=480) already matches the 480px cap. */
 :root {
+  --game-col: min(95vw, 480px);
+
   --panel-bg: var(--card);
   --panel-border: var(--line);
   --button-bg: var(--card-2);
@@ -48,8 +55,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  width: min(95vw, 560px);
-  max-width: calc(100vw - 32px);
+  width: var(--game-col);
+  max-width: calc(var(--game-col) - 24px);
   margin: 0 auto;
   padding: var(--sp-4) 0 0;
   min-height: 60px;
@@ -135,8 +142,7 @@ body {
   font-weight: 700;
   margin: var(--sp-3) 0;
   padding: 10px 22px;
-  width: min(95vw, 520px);
-  max-width: calc(100vw - 32px);
+  width: var(--game-col);
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
@@ -161,7 +167,7 @@ canvas#cnv {
   display: block;
   touch-action: none;
   width: auto;
-  max-width: min(95vw, 480px);
+  max-width: var(--game-col);
   max-height: 70vh;
   border-radius: 12px;
   border: 1px solid var(--line);
@@ -177,8 +183,8 @@ canvas#cnv {
   justify-content: center;
   font-size: 18px;
   padding: 6px 12px;
-  width: min(95vw, 480px);
-  max-width: calc(min(95vw, 480px) - 24px);
+  width: var(--game-col);
+  max-width: calc(var(--game-col) - 24px);
   box-sizing: border-box;
   background: var(--card-2);
   border: 1px solid var(--line);
@@ -297,7 +303,8 @@ canvas#cnv {
   margin: var(--sp-3) 0;
   justify-content: center;
   flex-wrap: wrap;
-  width: min(95vw, 620px);
+  width: var(--game-col);
+  max-width: calc(var(--game-col) - 24px);
 }
 
 .game-btn {
