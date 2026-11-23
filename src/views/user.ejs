@@ -56,6 +56,10 @@
            the row (a guest shows as '-'). Result is from THIS user's perspective
            (win -> Победа). Client JS is not needed here (server-rendered); D1 may
            restyle later. The raw rows are also available at /api/users/:name/games. -->
+      <% if (!games || games.length === 0) { %>
+      <!-- Review fix (design-36): empty state outside the scrollable table (no clipping on 390px). -->
+      <p class="empty-note"><%- notFound ? 'Пользователь не найден' : 'Партий пока нет' %></p>
+      <% } else { %>
       <div class="account-table-wrap">
         <table id="profile-games-table" class="games-table">
           <thead>
@@ -67,18 +71,17 @@
             </tr>
           </thead>
           <tbody id="profile-games-body">
-            <% (games && games.length ? games : []).forEach(function (g) { %>  <tr>
+            <% games.forEach(function (g) { %>  <tr>
               <td><%= g.date %></td>
               <td><%= g.opponent %></td>
               <td class="result result-<%= g.result %>"><%= g.result === 'win' ? 'Победа' : (g.result === 'loss' ? 'Поражение' : 'Ничья') %></td>
               <td><%= g.method %></td>
             </tr>
             <% }); %>
-            <% if (!games || games.length === 0) { %>  <tr class="empty-row"><td colspan="4"><%- (notFound ? 'Пользователь не найден' : 'Партий пока нет') %></td></tr>
-            <% } %>
           </tbody>
         </table>
       </div>
+      <% } %>
     </div>
   </div>
 

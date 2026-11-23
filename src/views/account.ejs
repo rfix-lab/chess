@@ -41,6 +41,11 @@
         <div class="account-count">Сыграно партий: <%- played %></div>
       </div>
 
+      <% if (!games || games.length === 0) { %>
+      <!-- Review fix (design-36): the empty state lives OUTSIDE the horizontally
+           scrollable table so it can never clip on 390px screens. -->
+      <p class="empty-note">Партий пока нет</p>
+      <% } else { %>
       <div class="account-table-wrap">
         <table id="games-table" class="games-table">
           <thead>
@@ -53,7 +58,7 @@
             </tr>
           </thead>
           <tbody id="games-body">
-            <% (games && games.length ? games : []).forEach(function (g) { %>  <tr>
+            <% games.forEach(function (g) { %>  <tr>
               <td><%= g.date %></td>
               <td><%= g.opponent %></td>
               <td class="result result-<%= g.result %>"><%= g.result === 'win' ? 'Победа' : (g.result === 'loss' ? 'Поражение' : 'Ничья') %></td>
@@ -61,11 +66,10 @@
               <td><%= g.eloAfter %></td>
             </tr>
             <% }); %>
-            <% if (!games || games.length === 0) { %>  <tr class="empty-row"><td colspan="5">Партий пока нет</td></tr>
-            <% } %>
           </tbody>
         </table>
       </div>
+      <% } %>
     </div>
   </div>
 </body>

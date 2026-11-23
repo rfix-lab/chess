@@ -401,7 +401,13 @@
   flex-wrap: wrap;
 }
 
-/* Empty-table state. */
+/* Empty-table state (paragraph outside the scrollable table — review fix,
+   design-36; .empty-row kept for any legacy table markup). */
+.empty-note {
+  margin: var(--sp-5) 0;
+  text-align: center;
+  color: var(--text-faint);
+}
 .empty-row td {
   text-align: center;
   color: var(--text-faint);
