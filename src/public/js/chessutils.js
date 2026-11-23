@@ -482,6 +482,13 @@ function kingMoveValidate(board, moveFromCoord, moveToCoord, turn, match) {
 }
 
 function genMoves(board, position){
+    // Display-only indicator bits (last-move 0b10000 / check 0b100000 /
+    // en-passant 0b1000000, ORed into the board by the server's 'validated'
+    // payload for highlighting) must NOT participate in occupancy logic:
+    // an indicator-only square (e.g. 16) would look OCCUPIED (breaking
+    // sliding paths) and getColor(16)==white would look like a WHITE piece
+    // (blocking own moves / faking captures). Strip them for validation.
+    board = stripIndicators(board);
     // if(!validBoard(board))
     //     return [];
     let moves = [];
@@ -520,6 +527,8 @@ function genAllMoves(board, color){
 // to highlight/allow castling + en-passant in its UI. This is a legitimate difference
 // from the server's 2-arg genLegalMoves, which gets a real match from index.js.
 function genLegalMoves(board, position, castlingRights, lastMove){
+    // see genMoves: indicator bits are paint, not occupancy
+    board = stripIndicators(board);
     // if(!validBoard(board))
     //     return [];
     let moves = [];
@@ -578,8 +587,15 @@ function genAllLegalMoves(board, color){
     return moves;
 }
 
+// Strip display-only indicator bits (>= 0b10000) from every square (copy,
+// never mutates the caller's paint board).
+function stripIndicators(board) {
+    return board.map(function (r) { return r.map(function (v) { return v & 0b1111; }); });
+}
+
 // Check if the king is currently in check on the given board for the given turn
 function isKingInCheck(board, turn) {
+    board = stripIndicators(board);
     let currColor = turnToColor(turn);
     let kingPos = Coord(0, 0);
     let found = false;

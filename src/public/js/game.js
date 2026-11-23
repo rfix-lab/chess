@@ -371,7 +371,10 @@ function grabDragPiece(px, py) {
         return;
     // set the holding piece to whatever is on that square
     is_holding_piece = true;
-    holding_piece = board[i][j];
+    // strip indicator bits (last-move/check/en-passant, >= 0b10000): the held
+    // piece may be RESTORED into the board later (cancel branch / click flow),
+    // and a raw value would plant a piece+indicator ghost square.
+    holding_piece = board[i][j] & 0b1111;
     from_position = { x: j, y: i };
 }
 
@@ -457,7 +460,7 @@ function handle_drag() {
         // completeDrag(), so this branch must never mutate the board for it.
         // Restore the piece on its original square (the render loop blanks
         // that square while a piece is held).
-        board[from_position.y][from_position.x] = holding_piece;
+        board[from_position.y][from_position.x] = holding_piece & 0b1111;
         is_holding_piece = false;
         dragSettled = false;
         holding_piece = 0;
@@ -554,6 +557,14 @@ canvas.onmouseup = (e) => {
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
             executeClickToMove(j, i);
         }
+        // BUGFIX (Immortal-game audit): mousedown grabbed a piece (is_holding_piece),
+        // but the CLICK path never released that grab state. sendMoveToServer then
+        // reuses from_position for the move's origin, and the render loop's
+        // cancelled-grab branch later RESTORED the stale held piece onto it —
+        // planting a ghost piece (with stale indicator bits) on the client board
+        // after the next 'validated'. A completed click must leave no grab state.
+        is_holding_piece = false;
+        holding_piece = 0;
     }
     if (isDragging) {
         // fix C: complete the drop and emit the move right here in the
@@ -590,6 +601,9 @@ canvas.ontouchend = (e) => {
         if (i >= 0 && i < no_of_squares && j >= 0 && j < no_of_squares) {
             executeClickToMove(j, i);
         }
+        // same grab-state release as the mouseup click path (see BUGFIX there)
+        is_holding_piece = false;
+        holding_piece = 0;
     }
     if (isDragging) {
         // fix C: same event-driven drop + emit as mouseup

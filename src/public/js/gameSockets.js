@@ -297,9 +297,25 @@ socket.on('resignReceived', (data) => {
   } else {
     document.getElementById('status').innerText = `${colorName} resigned. You won! 🎉`;
   }
+  showEndModal('Сдача', document.getElementById('status').innerText);
 });
 
 // --- Incoming: Game end (agreement draw) ---
+// BUGFIX (Immortal-game browser audit): nothing ever opened gameEndModal —
+// every game-over path only rewrote the status line, so the end modal and the
+// F3 replay UI were unreachable. Central opener, used by gameEnd/checkMate/
+// stalemate/draw/resignReceived; display value matches .modal-overlay (flex).
+function showEndModal(title, text) {
+  const modal = document.getElementById('gameEndModal');
+  if (!modal) return;
+  const t = document.getElementById('gameEndTitle');
+  const p = document.getElementById('gameEndText');
+  if (t) t.innerText = title || '';
+  if (p) p.innerText = text || '';
+  modal.style.display = 'flex';
+  if (replayMoves && replayMoves.length) showReplay();
+}
+
 socket.on('gameEnd', (data) => {
   can_move = false;
   gameIsOver = true;
@@ -307,6 +323,7 @@ socket.on('gameEnd', (data) => {
   disableAllGameActions();
   if (!data) {
     document.getElementById('status').innerText = 'Game over';
+    showEndModal('Игра окончена', 'Game over');
     return;
   }
   const messages = {
@@ -325,8 +342,8 @@ socket.on('gameEnd', (data) => {
     document.getElementById('status').innerText += ` (Elo: вы ${myElo}, соперник ${oppElo})`;
   }
   // F3: if the replay is already in hand (or saved from a pre-end receive),
-  // expose it in the end modal.
-  if (replayMoves && replayMoves.length) showReplay();
+  // expose it in the end modal — and OPEN the modal itself.
+  showEndModal('Игра окончена', messages[data.result] || 'Game over');
 });
 
 // --- F3: replay (move history + playback) ---
@@ -406,6 +423,11 @@ function applyReplayPosition(idx) {
     const m = replayMoves[idx - 1];
     if (m && m.fenAfter) fen_to_board(m.fenAfter);
   }
+  // fen_to_board writes SERVER orientation — keep the black-view invariant
+  // (same rule as window.onload / 'validated'): the visual board of a black
+  // player is the 180-degree rotation. Without this, replay/rewind rendered
+  // the black player's board from white's perspective (Immortal audit).
+  if (my_color === 1) board = window.ChessLayout.rotateBoard(board, 1);
   replayIndex = Math.max(0, Math.min(idx, replayMoves.length));
   draw();
   render_board();
@@ -549,6 +571,9 @@ socket.on('checkMate', turn => {
   }
   else
     document.getElementById('status').innerText = 'Check Mate you Won! 🎉';
+  // checkmate arrives AFTER gameEnd (server order) — refresh the open modal
+  // with the richer text instead of leaving the generic one.
+  showEndModal('Шах и мат', document.getElementById('status').innerText);
 });
 
 // stalemate (draw)
@@ -558,6 +583,7 @@ socket.on('stalemate', () => {
   clearSession();
   disableAllGameActions();
   document.getElementById('status').innerText = 'Stalemate — Draw! 🤝';
+  showEndModal('Ничья (пат)', 'Stalemate — Draw! 🤝');
 });
 
 // draw (threefold repetition)
@@ -568,6 +594,7 @@ socket.on('draw', (data) => {
   disableAllGameActions();
   if (!data) {
     document.getElementById('status').innerText = 'Ничья! 🤝';
+    showEndModal('Ничья', 'Ничья! 🤝');
     return;
   }
   const reasons = {
@@ -576,6 +603,7 @@ socket.on('draw', (data) => {
     'fifty': 'Ничья — правило 50 ходов! 🤝',
   };
   document.getElementById('status').innerText = reasons[data.reason] || 'Ничья! 🤝';
+  showEndModal('Ничья', document.getElementById('status').innerText);
 });
 
 // Takeback button
