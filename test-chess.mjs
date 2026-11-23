@@ -897,12 +897,11 @@ async function test() {
     // Phase 1: U creates match #1; guest G joins FIRST (no seat-elo for
     // guests), then U (registered) joins -> rated=false, opponent=null.
     let seMatch1 = null, seMatch2 = null, seMatch3 = null;
-    seU.on('private-match', (id) => {
-      if (seMatch1 === null) { seMatch1 = id; seG.emit('auth', null, id); }
-      else if (seMatch2 === null) { seMatch2 = id; seG2.emit('auth', null, id); }
+    seU.on('private-match', (id) => { if (seMatch1 === null) { seMatch1 = id; seG.emit('auth', null, id); } });
+    seU3.on('private-match', (id) => {
+      if (seMatch2 === null) { seMatch2 = id; seG2.emit('auth', null, id); }
       else if (seMatch3 === null) { seMatch3 = id; seU.emit('auth', seU1s, id); }
     });
-    seU3.on('private-match', (id) => { if (seMatch3 === null) { seMatch3 = id; seU.emit('auth', seU1s, id); } });
     seU.emit('private-match', null);
     await Promise.race([new Promise(r => seU.once('private-match', r)), sleep(3000)]);
     await sleep(700);
@@ -923,8 +922,8 @@ async function test() {
     // packets are dropped server-side, so the match would never be created),
     // and the disconnect comes AFTER creation — it ends match #1, but U is
     // only the CREATOR of match #2 (never seated in it), so match #2 survives.
-    seU.emit('private-match', null);
-    await Promise.race([new Promise(r => seU.once('private-match', r)), sleep(3000)]);
+    seU3.emit('private-match', null);
+    await Promise.race([new Promise(r => seU3.once('private-match', r)), sleep(3000)]);
     seU.disconnect();
     await sleep(300);
     await sleep(700);
@@ -938,13 +937,26 @@ async function test() {
     else fail('T30 seat-elo: fresh guest should get no seat elo', JSON.stringify(guestEloSeen));
 
     // Phase 3: registered vs REGISTERED — U3 (creator) shares match #3's
-    // link without seating; U joins first (player1; no seat-elo yet — the
-    // opponent slot is still empty), U2 joins second (player2). The seated
-    // pair is U vs U2, both registered: both sockets must get rated=true
-    // with opponent = the other player's own elo (reciprocal).
+    // link without seating; U joins first (player1 — at U's seating the
+    // opponent slot is still empty, so U's own payload reads rated:false and
+    // is NOT the rated pair), U2 joins second (player2) -> BOTH seated sockets
+    // get rated=true with opponent = the other player's own elo (reciprocal).
+    // Join order must be DETERMINISTIC (U before U2): the echo triggers U's
+    // auth synchronously, while U2's auth is a separate emit that would race
+    // the server queue — if U2 got queued first, both payloads read
+    // rated:false (opponent not yet registered at each one's seating).
+    // Gate: U2 joins only after U's phase-3 payload (the rated:false one,
+    // emitted at U's seating) has been received.
     seU3.emit('private-match', null);
     await Promise.race([new Promise(r => seU3.once('private-match', r)), sleep(3000)]);
-    await sleep(700);
+    const u1CountAtP3Start = u1Elos.length;
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (u1Elos.length > u1CountAtP3Start) { clearInterval(t); r(); }
+      }, 50);
+      setTimeout(() => { clearInterval(t); r(); }, 3000);
+    });
+    await sleep(200); // margin: U's socket is seated before U2's auth lands
     if (seU2s) seU2.emit('auth', seU2s, seMatch3);
     await sleep(1000);
     const u1Rated = u1Elos[u1Elos.length - 1];
