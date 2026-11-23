@@ -1,6 +1,7 @@
 const move_sound = new Audio('/audio/move-self.mp3');
 const capture_sound = new Audio('/audio/capture.mp3');
 const wrong_move_sound = new Audio('/audio/wrong_move_sound.mp3');
+wrong_move_sound.volume = 0.35; // soft quiet 'duff' — contract 37 stage B
 
 const canvas = document.getElementById("cnv");
 const ctx = canvas.getContext('2d');
