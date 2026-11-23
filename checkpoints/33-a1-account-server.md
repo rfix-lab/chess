@@ -38,7 +38,10 @@ re-run ONCE; on second failure it is real.
       silent-miss behavior). npm test green.
 - [x] 7a. (contract addendum 2026-11-23) index.js GET /api/me: parse sessionID cookie
       (same regex as socket handshake logger), validateSession -> 200 {username, elo} or
-      401 {}. Thin route. T31 row: valid cookie -> 200 username; absent/bogus -> 401.
+      401 {}. Thin route. T31 rows: valid cookie -> 200 {username, elo}; absent -> 401;
+      bogus session cookie -> 401. ADDENDUM FULLY LANDED: route in 2b1dfff, test rows in
+      275aa26 — the orchestrator's follow-up scope-addendum message (delivered after my
+      final report) matched what was already committed; no new work required.
 - [x] 7. index.js GET /account: sessionID cookie -> user (same lookup as the socket
       handshake log); else redirect to /. Renders account.ejs with
       {username, elo, games:[{date, opponent, result: win|loss|draw (from MY view),
@@ -121,7 +124,7 @@ re-run ONCE; on second failure it is real.
 - acd93f0 feat(server): T31 games.csv lib — append-only history + parser (DATA_DIR)
 - 2b1dfff feat(server): T31 — games.csv in endMatch (elo before/after, guest-skip) + invites lib/events + invite-bound join + /account + /api/me
 - 9b813ce fix(server): T31 — invite push in auth reads socket.data.user (scoped-const ReferenceError)
-- (next) test(server): T31 — 20 rows: games.csv content (F2 row, guest-guest skip, reg-guest, invite game), invite:create failure reasons + created, automatic invites push, invites:list live/dead filter, invite-bound join (guest/wrong-user/target/inviter), /account (no cookie / with cookie / row data), /api/me (200/401/401) + signinWithRetry hardening for T30/T31 under parallel load
+- 275aa26 test(server): T31 — 20 rows: games.csv content (F2 row, guest-guest skip, reg-guest, invite game), invite:create failure reasons + created, automatic invites push, invites:list live/dead filter, invite-bound join (guest/wrong-user/target/inviter), /account (no cookie / with cookie / row data), /api/me (200/401/401) + signinWithRetry hardening for T30/T31 under parallel load
 - 612bc5d docs: contract addendum — lobby session restore (S-A: GET /api/me) [orchestrator]
 - 3c9869d feat(client): lobby big-button stack + invites + game link/invite + account page (contract 32) [S-B]
 
