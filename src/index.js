@@ -263,6 +263,26 @@ app.use(express.static(path.dirname(__filename) + '/public'));
 app.set('view engine', 'ejs');
 app.set('views', path.dirname(__filename) + '/views');
 
+// T33 (contract 36): shared cookie->user resolver for socket handlers that may
+// come from UNAUTHENTICATED pages (the /users and /index lobby sockets never
+// emit 'auth', which is the only handler that sets socket.data.user). The
+// sessionID cookie rides the socket.io handshake (same header the browser
+// sends). First checks the cache set by 'auth'; on a miss it validates the
+// handshake cookie (validateSession — same call /api/me and the connection
+// logger use) and caches the result in socket.data.user for later handlers on
+// the same socket. GUEST path is silent (no dlog) — the /users page is public
+// and its guests poll the socket on load.
+function resolveUserFromSocket(socket) {
+  const cached = socket.data && socket.data.user;
+  if (cached) return cached;
+  const cookie = (socket.handshake && socket.handshake.headers['cookie']) || '';
+  const sidMatch = cookie.match(/sessionID=([^;\s]+)/);
+  if (!sidMatch) return null;
+  const user = validateSession(users, sidMatch[1]);
+  if (user) socket.data.user = user;
+  return user;
+}
+
 // routes
 app.get('/', (req, res) => {
   res.redirect('/index');
@@ -740,12 +760,19 @@ io.on('connection', socket => {
   // and joins as white via the normal auth(matchId) flow; the target's join is
   // restricted by the invite check (event 4).
   socket.on('invite:create', ({ targetUsername, method } = {}) => {
-    const me = socket.data && socket.data.user;
+    // T33 (contract 36): the inviter may sit on an UNAUTHENTICATED page (the
+    // /users directory never emits 'auth') — fall back to the shared cookie
+    // resolver, which caches into socket.data.user (findPrivateMatch reads it
+    // when the inviter later joins the invite-bound match).
+    let me = socket.data && socket.data.user;
+    if (!me) me = resolveUserFromSocket(socket);
     if (!me) {
       dlog('invite:create: FAILED reason=auth socket=', socket.id);
       return socket.emit('invite:failed', { reason: 'auth' });
     }
-    if (method !== 'standard') {
+    // T33 (contract 36): methods — 'standard' | 'rapid' (anything else is
+    // 'method-na'; the T31 row asserted method 'blitz' fails the same way).
+    if (method !== 'standard' && method !== 'rapid') {
       dlog('invite:create: FAILED reason=method-na method=', method, 'from=', me.username);
       return socket.emit('invite:failed', { reason: 'method-na' });
     }
@@ -761,8 +788,12 @@ io.on('connection', socket => {
     const newId = genMatchId();
     const privateMatch = initMatch(newId, null);
     privateMatch.private = true;
+    // T33 (contract 36): the invite's method is copied onto the match
+    // (match.method) so endMatch can record it in games.csv; the match is the
+    // single source of truth for the end-of-game path.
+    privateMatch.method = method;
     matches.push(privateMatch);
-    const invite = createInvite({ to: target.username, from: me.username, fromElo: Number(me.elo) || START_ELO, method: 'standard', matchId: newId });
+    const invite = createInvite({ to: target.username, from: me.username, fromElo: Number(me.elo) || START_ELO, method: method, matchId: newId });
     // Integration fix (orchestrator smoke): real-time delivery to the TARGET.
     // The contract says the invite "arrives" for the invited user; previously
     // only list/push-on-auth existed, so a target with an open lobby saw
@@ -788,19 +819,14 @@ io.on('connection', socket => {
   // gameNotFound path (graceful). The automatic push after an authenticated
   // 'auth' uses the same listLiveInvitesTo list.
   socket.on('invites:list', () => {
-    // Integration fix (orchestrator smoke): the LOBBY page never emits 'auth'
-    // (only the game page does), so socket.data.user is unset there and the
-    // invites request was silently dropped — the target user saw no invite row
-    // until they re-authenticated. Resolve the user from the handshake cookie
-    // (same regex as the connection logger); caching it in socket.data.user
-    // keeps invite:create consistent for authenticated lobby sockets too.
-    let me = socket.data && socket.data.user;
-    if (!me) {
-      const cookie = socket.handshake.headers['cookie'] || '';
-      const sidMatch = cookie.match(/sessionID=([^;\s]+)/);
-      const user = sidMatch ? validateSession(users, sidMatch[1]) : null;
-      if (user) { me = user; socket.data.user = user; }
-    }
+    // T31 (contract 32, integration fix): the LOBBY page never emits 'auth'
+    // (only the game page does), so the original socket.data.user-only gate
+    // dropped the request — the target user saw no invite row until reload.
+    // T33 (contract 36): the same gap applies to the NEW /users directory page
+    // (also unauthenticated), so the cookie fallback is factored out into
+    // resolveUserFromSocket(socket) and shared by both handlers; the guest
+    // path stays silent (the public page has no auth event to log against).
+    const me = resolveUserFromSocket(socket);
     if (!me) return; // guests have no invites (auth gate)
     const live = listLiveInvitesTo(me.username);
     dlog('invites:list: user=', me.username, 'live=', live.length);
