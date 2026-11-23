@@ -343,12 +343,12 @@ app.get('/account', (req, res) => {
       if (g.white === user.username) {
         mine.push({
           date: g.ts, opponent: g.black, result: g.result === 'draw' ? 'draw' : (g.result === 'white-win' ? 'win' : 'loss'),
-          method: 'стандартная', eloBefore: g.whiteEloBefore, eloAfter: g.whiteEloAfter
+          method: methodLabel(g.method), eloBefore: g.whiteEloBefore, eloAfter: g.whiteEloAfter
         });
       } else if (g.black === user.username) {
         mine.push({
           date: g.ts, opponent: g.white, result: g.result === 'draw' ? 'draw' : (g.result === 'black-win' ? 'win' : 'loss'),
-          method: 'стандартная', eloBefore: g.blackEloBefore, eloAfter: g.blackEloAfter
+          method: methodLabel(g.method), eloBefore: g.blackEloBefore, eloAfter: g.blackEloAfter
         });
       }
     }
@@ -375,6 +375,142 @@ app.get('/api/me', (req, res) => {
   }
   dlog('api/me: 200 username=', user.username);
   res.json({ username: user.username, elo: Number(user.elo) || START_ELO });
+});
+
+// T33 (contract 36): game-method label (user-visible Russian, per the user's
+// method-picker wording): 'standard' -> «Классика», 'rapid' -> «Рапид»,
+// anything else (legacy/unknown) -> the raw value. Shared by /account, /user
+// and /api/users/:name/games.
+function methodLabel(method) {
+  if (method === 'rapid') return 'Рапид';
+  if (method === 'standard' || !method) return 'Классика';
+  return String(method);
+}
+
+// T33 (contract 36, point 3): GET /api/users/stats — the users directory data.
+// ALL registered users: [{username, elo, games}] where `games` counts games.csv
+// rows with the user in the white or black column (guest rows use '-', so only
+// registered sides ever match). Sorted by elo DESC, then username ASC.
+// Public (no auth) — the /users page is viewable by anyone.
+app.get('/api/users/stats', (req, res) => {
+  let rows = [];
+  try { rows = loadGames(); } catch (e) { dlog('users/stats: games.csv read failed', String(e)); }
+  const counts = {};
+  for (const g of rows) {
+    if (g.white) counts[g.white] = (counts[g.white] || 0) + 1;
+    if (g.black) counts[g.black] = (counts[g.black] || 0) + 1;
+  }
+  const stats = users.map(u => ({
+    username: u.username,
+    elo: Number(u.elo) || START_ELO,
+    games: counts[u.username] || 0
+  }));
+  stats.sort((a, b) => (b.elo - a.elo) || a.username.localeCompare(b.username));
+  dlog('users/stats: 200 users=', stats.length);
+  res.json(stats);
+});
+
+// T33 (contract 36, point 5): GET /api/users/:name/games — raw games.csv rows
+// for the public profile (JSON for the client E2E; the page itself is
+// server-rendered by /user). Newest first (the CSV is append-ordered, so the
+// file order is reversed). Opponent = the OTHER side of the row (a guest
+// appears as '-'); result is per-view (from THIS user's perspective): win |
+// loss | draw; method carries the label («стандартная» / «рапидная»). Unknown
+// username -> 404 {} (same shape /user renders with its Russian message).
+app.get('/api/users/:name/games', (req, res) => {
+  const name = String(req.params.name || '');
+  const user = findUserByName(users, name);
+  if (!user) {
+    dlog('users/:name/games: 404 username=', name);
+    return res.status(404).json({});
+  }
+  let rows = [];
+  try { rows = loadGames(); } catch (e) { dlog('users/:name/games: games.csv read failed', String(e)); }
+  const out = [];
+  for (let i = rows.length - 1; i >= 0; i--) { // newest first
+    const g = rows[i];
+    let opponent = null, result = 'draw';
+    if (g.white === user.username) {
+      opponent = g.black || '-';
+      result = g.result === 'draw' ? 'draw' : (g.result === 'white-win' ? 'win' : 'loss');
+    } else if (g.black === user.username) {
+      opponent = g.white || '-';
+      result = g.result === 'draw' ? 'draw' : (g.result === 'black-win' ? 'win' : 'loss');
+    } else {
+      continue;
+    }
+    out.push({
+      date: g.ts,
+      opponent: opponent,
+      result: result,
+      method: methodLabel(g.method)
+    });
+  }
+  dlog('users/:name/games: 200 username=', name, 'rows=', out.length);
+  res.json(out);
+});
+
+// T33 (contract 36, point 4): GET /users — public users directory (no auth to
+// VIEW; the invite action is client-side via the socket cookie). Renders
+// users.ejs with the same sorted stats as /api/users/stats. Server-rendered
+// placeholder skeleton (Имя | Elo | Игр) — D1 restyles later; the client
+// (S-B) may re-render rows from /api/users/stats in src/public/js/users.js.
+app.get('/users', (req, res) => {
+  let rows = [];
+  try { rows = loadGames(); } catch (e) { dlog('users: games.csv read failed', String(e)); }
+  const counts = {};
+  for (const g of rows) {
+    if (g.white) counts[g.white] = (counts[g.white] || 0) + 1;
+    if (g.black) counts[g.black] = (counts[g.black] || 0) + 1;
+  }
+  const stats = users.map(u => ({
+    username: u.username,
+    elo: Number(u.elo) || START_ELO,
+    games: counts[u.username] || 0
+  }));
+  stats.sort((a, b) => (b.elo - a.elo) || a.username.localeCompare(b.username));
+  dlog('users: rendered users=', stats.length);
+  res.render('users', { users: stats });
+});
+
+// T33 (contract 36, point 5): GET /user?name=<username> — PUBLIC profile.
+// Table Дата | Соперник | Результат (+ method label) from games.csv, newest
+// first; the opponent is the other column of the row (guest '-'). Unknown
+// user -> 404 with a short Russian message. No auth to view.
+app.get('/user', (req, res) => {
+  const name = String(req.query.name || '');
+  const user = findUserByName(users, name);
+  if (!user) {
+    dlog('user: 404 username=', name);
+    return res.status(404).render('user', {
+      username: name,
+      elo: 0,
+      played: 0,
+      games: [],
+      notFound: true,
+      msg: 'Пользователь не найден'
+    });
+  }
+  let rows = [];
+  try { rows = loadGames(); } catch (e) { dlog('user: games.csv read failed', String(e)); }
+  const games = [];
+  for (let i = rows.length - 1; i >= 0; i--) { // newest first
+    const g = rows[i];
+    if (g.white === user.username) {
+      games.push({ date: g.ts, opponent: g.black || '-', result: g.result === 'draw' ? 'draw' : (g.result === 'white-win' ? 'win' : 'loss'), method: methodLabel(g.method) });
+    } else if (g.black === user.username) {
+      games.push({ date: g.ts, opponent: g.white || '-', result: g.result === 'draw' ? 'draw' : (g.result === 'black-win' ? 'win' : 'loss'), method: methodLabel(g.method) });
+    }
+  }
+  dlog('user: rendered username=', user.username, 'games=', games.length);
+  res.render('user', {
+    username: user.username,
+    elo: Number(user.elo) || START_ELO,
+    played: games.length,
+    games: games,
+    notFound: false,
+    msg: 'Партий пока нет'
+  });
 });
 
 // socket.io server
