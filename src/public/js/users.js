@@ -196,6 +196,12 @@ function ioSocketsEmit(payload) {
     socket.on('invite:created', (data) => {
       closeUserMenu();
       usersToast('Приглашение отправлено');
+      // Integration fix (contract 36 smoke): the invite-bound match is created
+      // UNSEATED; without this the inviter stayed on /users and the invitee sat
+      // alone after accepting. Take the inviter into the game (same behavior as
+      // the game-page invite flow, contract 32).
+      const mid = data && data.matchId;
+      if (mid) window.location.href = '/game?matchId=' + encodeURIComponent(mid);
     });
     socket.on('invite:failed', (data) => {
       const reason = (data && data.reason) || '';

@@ -772,6 +772,12 @@ function showGameLink(id) {
 let __linkModalPending = (location.hash || '') === '#link';
 if (__linkModalPending) {
   history.replaceState(null, '', location.pathname + location.search);
+  // Integration fix (contract 36 smoke): a SOLO host arriving from the lobby
+  // [Играть] flow has no second player yet — 'startGame'/'reconnected' never
+  // fire, so the modal used to stay closed and the link could not be shared.
+  // The matchId is already in the URL, so open immediately.
+  const __pendingId = new URLSearchParams(location.search).get('matchId');
+  if (__pendingId) { __linkModalPending = false; showGameLink(__pendingId); }
 }
 
 // The server echoes the generated id back on the SAME socket that requested it.

@@ -834,13 +834,21 @@ try {
         const item = m && Array.from(m.querySelectorAll('.user-menu-method')).find(i => i.textContent === 'Рапид');
         if (item) item.click();
       }, invName);
-      const toast = await waitFor(async () => {
-        const t = await u1Page.evaluate(() => {
-          const el = document.querySelector('.toast');
-          return el ? el.textContent : null;
-        });
-        return (t === 'Приглашение отправлено') ? t : null;
-      }, 'success toast after invite:create', 10000);
+      // Contract 36 INTEGRATION FIX (orchestrator smoke): invite:created now
+      // also NAVIGATES the inviter into the invite-bound match (without it the
+      // invitee sat alone — the inviter had no way back into the match it
+      // created). The toast can therefore be destroyed by the navigation, so
+      // the client-side signal is the toast OR the /game?matchId= navigation.
+      let toast = null;
+      try {
+        toast = await waitFor(async () => {
+          const t = await u1Page.evaluate(() => {
+            const el = document.querySelector('.toast');
+            return el ? el.textContent : null;
+          });
+          return (t === 'Приглашение отправлено') ? t : null;
+        }, 'success toast after invite:create', 4000);
+      } catch (e) { toast = null; }
       const inviteLine = serverLog().split('\n').filter(l => l.includes('invite:create: OK') && l.includes('from= ' + u1Name) && l.includes('to= ' + invName));
       // The stored invite record (A2's lib/invites.js persists to DATA_DIR/invites.json)
       // carries the chosen method — it is the authoritative source for the match id.
@@ -851,8 +859,17 @@ try {
         invitesOk = !!rec && rec.method === 'rapid' && rec.matchId !== undefined;
         if (rec && rec.matchId) inviteMatchId = String(rec.matchId);
       } catch (e) { invitesOk = null; }
-      x5Ok = toast === 'Приглашение отправлено' && inviteLine.length > 0 && invitesOk === true;
-      x5Detail = `toast="${toast}"; server line=${(inviteLine[0] || 'NONE').slice(0, 140)}; invites.json record method=rapid matchId=${inviteMatchId}: ${invitesOk}`;
+      let navigated = null;
+      try {
+        navigated = await waitFor(async () => {
+          const u = u1Page.url();
+          const m2 = /[?&]matchId=([^&]+)/.exec(u);
+          return (u.indexOf('/game') !== -1 && m2) ? m2[1] : null;
+        }, 'inviter navigated into the invite match', 10000);
+      } catch (e) { navigated = null; }
+      x5Ok = invitesOk === true && inviteLine.length > 0 &&
+        (toast === 'Приглашение отправлено' || navigated === inviteMatchId);
+      x5Detail = `toast="${toast}"; navigated=${navigated}; server line=${(inviteLine[0] || 'NONE').slice(0, 140)}; invites.json record method=rapid matchId=${inviteMatchId}: ${invitesOk}`;
       results.invite36 = { u1: u1Name, invitee: invName, method: 'rapid', matchId: inviteMatchId };
     } catch (e) {
       x5Detail = 'invite flow error: ' + (e && e.message || e);
@@ -903,12 +920,15 @@ try {
       const href = results.invite36 && results.invite36.acceptHref;
       const matchId36 = results.invite36 && results.invite36.matchId;
       await inviteePage.goto(BASE + (href || '/game?matchId='), { waitUntil: 'networkidle2' });
-      // u1 joins the SAME invite-bound match (allowed: invite.from). Fire &
-      // forget — the combined wait below covers both players' startGame.
-      void (async () => {
-        try { await u1Page.goto(BASE + '/game?matchId=' + (matchId36 || ''), { waitUntil: 'networkidle2' }); }
-        catch (e) { /* reported through the seating waits */ }
-      })();
+      // Contract 36 integration fix: the inviter was ALREADY navigated into the
+      // match by invite:created (X5). Reload it only if it is not there yet — a
+      // needless reload would risk the pre-start disconnect path.
+      if (!String(u1Page.url()).includes('matchId=' + matchId36)) {
+        void (async () => {
+          try { await u1Page.goto(BASE + '/game?matchId=' + (matchId36 || ''), { waitUntil: 'networkidle2' }); }
+          catch (e) { /* reported through the seating waits */ }
+        })();
+      }
       const seated = await waitFor(async () => {
         const sInv = await inviteePage.evaluate(() => document.getElementById('status').innerText).catch(() => '');
         const sU1 = await u1Page.evaluate(() => document.getElementById('status').innerText).catch(() => '');

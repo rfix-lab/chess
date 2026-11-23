@@ -71,8 +71,10 @@
   </div>
 
   <script src="js/cookieUtil.js"></script>
-  <script src="js/indexSockets.js"></script>
+  <!-- Integration fix (contract 36): index.js defines the global `play` used by
+       wireBigButtons() in indexSockets.js — it must load FIRST. -->
   <script src="js/index.js"></script>
+  <script src="js/indexSockets.js"></script>
 </body>
 
 </html>

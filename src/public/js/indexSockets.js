@@ -92,8 +92,13 @@ function doLogout() {
   const login = document.getElementById('login-button');
   const register = document.getElementById('register-button');
   const usersBtn = document.getElementById('users-button');
+  const playBtn = document.getElementById('play-button');
   if (login) login.addEventListener('click', () => showAuthForm('login'));
   if (register) register.addEventListener('click', () => showAuthForm('signup'));
+  // Contract 36 integration fix (orchestrator smoke): #play-button had no click
+  // binding at all ([Играть] did nothing). `play` is defined in index.js
+  // (loaded before this file) and emits 'private-match' -> /game?matchId=#link.
+  if (playBtn && typeof play === 'function') playBtn.addEventListener('click', () => play());
   // Contract 36 §1: [Пользователи] -> the /users directory page.
   if (usersBtn) usersBtn.addEventListener('click', () => { window.location.href = '/users'; });
   // A returning, still-authenticated user: reveal Кабинет + hide [Вход]/
