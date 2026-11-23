@@ -6,6 +6,7 @@ const canvas = document.getElementById("cnv");
 const ctx = canvas.getContext('2d');
 
 var dark_square_color = '#55648a';
+var label_color = '#eef2f9'; // board rank/file labels — synced to --text by updateBoardColors
 var light_square_color = '#e9eef6';
 const move_square_color = '#7af4ae';
 const possible_move_color = '#74f551';
@@ -104,19 +105,28 @@ const selected_square_opacity = 0.5;
 
 let sprites = [];
 sprites[blank] = ' ';
-sprites[white | pawn] = '♙';
-sprites[white | king] = '♔';
-sprites[white | queen] = '♕';
-sprites[white | rook] = '♖';
-sprites[white | bishop] = '♗';
-sprites[white | knight] = '♘';
+// USER-FACING RENDERING FIX (2026-11-23): the OUTLINE glyphs (U+2654-59) the
+// white side used to map to are hollow: on canvas the square color shows
+// through the interior — on dark squares white pieces looked "transparent /
+// nearly black". Both colors now use the SOLID glyph set (U+265A-5F); the
+// color distinction is done at draw time (white pieces: white fill + dark
+// stroke, see render_board). '\uFE0E' (text variation selector) forces a text
+// glyph on platforms that otherwise render chess symbols as COLOR EMOJI
+// (Android/macOS), which would ignore fillStyle entirely.
+const VS15 = '\uFE0E';
+sprites[white | pawn] = '♟' + VS15;
+sprites[white | king] = '♚' + VS15;
+sprites[white | queen] = '♛' + VS15;
+sprites[white | rook] = '♜' + VS15;
+sprites[white | bishop] = '♝' + VS15;
+sprites[white | knight] = '♞' + VS15;
 
-sprites[black | pawn] = '♟︎';
-sprites[black | king] = '♚';
-sprites[black | queen] = '♛';
-sprites[black | rook] = '♜';
-sprites[black | bishop] = '♝';
-sprites[black | knight] = '♞';
+sprites[black | pawn] = '♟' + VS15;
+sprites[black | king] = '♚' + VS15;
+sprites[black | queen] = '♛' + VS15;
+sprites[black | rook] = '♜' + VS15;
+sprites[black | bishop] = '♝' + VS15;
+sprites[black | knight] = '♞' + VS15;
 
 let board = [
   [12, 14, 13, 11, 10, 13, 14, 12],
@@ -178,20 +188,37 @@ function fen_to_board(fen) {
     board = new_board;
 }
 
-// Draws the pieces and pawns
+// Draws the pieces and pawns.
+// Both colors use the SOLID glyph set now (see sprites): white pieces are
+// painted white with a dark outline (a bare outline glyph was invisible on
+// dark squares), black pieces dark with a subtle light outline.
+function drawPieceGlyph(glyph, isWhite, gx, gy) {
+    if (isWhite) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(glyph, gx, gy);
+        ctx.strokeStyle = 'rgba(20, 26, 38, 0.9)';
+    } else {
+        ctx.fillStyle = '#141a26';
+        ctx.fillText(glyph, gx, gy);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    }
+    ctx.strokeText(glyph, gx, gy);
+}
+
 function render_board() {
     let side_len_square = side_len / no_of_squares;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = Math.floor(side_len_square * 0.75) + 'px sans-serif';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1, side_len_square * 0.045);
     for (let i = 0; i < no_of_squares; i++) {
         for (let j = 0; j < no_of_squares; j++) {
-            ctx.fillStyle = 'black';
-            ctx.fillText(
-                sprites[board[i][j] & (0b1111)],
+            const v = board[i][j] & 0b1111;
+            if (v === blank) continue; // strip indicators; empty needs no glyph
+            drawPieceGlyph(sprites[v], (v & black) === 0,
                 offset_x + j * side_len_square + side_len_square / 2,
-                offset_y + i * side_len_square + side_len_square / 2
-            );
+                offset_y + i * side_len_square + side_len_square / 2);
         }
     }
     ctx.textAlign = 'start';
@@ -244,33 +271,25 @@ function draw() {
         }
     }
     // Display the rank and file numbers and letters
-
-    // write the numbers (1 - 8 ranks)
-    ctx.fillStyle = 'black'
+    // THEME-AWARE (2026-11-23 fix): labels used to be drawn in 'black' on a
+    // 10px margin — invisible on the dark theme and half-clipped off-canvas.
+    // They now use the theme text color (label_color, refreshed by
+    // updateBoardColors) and sit CENTERED inside the layout.OFFSET margins.
+    const cell = side_len_square;
+    ctx.fillStyle = label_color;
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     for (let i = 0; i < no_of_squares; i++) {
-        ctx.font = '15px sans-serif';
-        if (my_color == 0) {
-            ctx.fillText(8 - i, offset_x / 3,
-                offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
-        } else {
-            ctx.fillText(1 + i, offset_x / 3,
-                offset_y * 1.3 + side_len_square / 2 + i * side_len_square);
-        }
+        // ranks: left margin, vertical center of each row
+        ctx.fillText(my_color == 0 ? String(8 - i) : String(1 + i),
+            offset_x / 2, offset_y + (i + 0.5) * cell);
+        // files: bottom margin, horizontal center of each column
+        ctx.fillText(my_color == 0 ? String.fromCharCode(97 + i) : String.fromCharCode(104 - i),
+            offset_x + (i + 0.5) * cell, offset_y + side_len + offset_y / 2);
     }
-
-    // write the letters (a - h files)
-    for (let i = 0; i < no_of_squares; i++) {
-        ctx.font = '15px sans-serif';
-        if (my_color == 0) {
-            ctx.fillText(String.fromCharCode(97 + i),
-                offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
-                offset_y * 1.1 + side_len + 10);
-        } else {
-            ctx.fillText(String.fromCharCode(104 - i),
-                offset_x * 0.9 + side_len_square / 2 + i * side_len_square,
-                offset_y * 1.1 + side_len + 10);
-        }
-    }
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
 }
 
 // get_box_coords -> layout.pixelToSquare: canvas px -> visual square.
@@ -447,10 +466,15 @@ function handle_drag() {
         if (is_holding_piece) {
             // if already holding a piece and the mouse is held down,
             // display the held piece at the mouse
-            ctx.fillStyle = 'black';
-            ctx.font = Math.floor(side_len / no_of_squares) * 0.8 + 'px sans serif';
-            let off_x = Math.floor(side_len / no_of_squares) * 0.3;
-            ctx.fillText(sprites[holding_piece], mouse_x - off_x, mouse_y);
+            ctx.font = Math.floor(side_len / no_of_squares) * 0.8 + 'px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = Math.max(1, (side_len / no_of_squares) * 0.045);
+            drawPieceGlyph(sprites[holding_piece], (holding_piece & black) === 0,
+                mouse_x, mouse_y);
+            ctx.textAlign = 'start';
+            ctx.textBaseline = 'alphabetic';
         }
     }
     else if (is_holding_piece) {
@@ -504,6 +528,10 @@ function display_possible_moves(){
 }
 
 window.onload = () => {
+    // apply the SAVED theme to the canvas colors before the first draw (theme.js
+    // runs before game.js exists, so its load-time updateBoardColors() is a no-op
+    // without this — a saved LIGHT theme used to paint dark-theme squares).
+    updateBoardColors();
     recalcLayout();
     // Only draw the initial board if there's no saved session.
     // If reconnecting, skip draw() here and wait for the 'reconnected' event
@@ -693,6 +721,7 @@ function updateBoardColors() {
   var root = getComputedStyle(document.documentElement);
   dark_square_color = root.getPropertyValue('--board-dark').trim() || '#4f5969';
   light_square_color = root.getPropertyValue('--board-light').trim() || '#c1c8d4';
+  label_color = root.getPropertyValue('--text').trim() || '#eef2f9';
 }
 
 window.onresize = () => { recalcLayout(); };

@@ -4,25 +4,50 @@ var socket = io();
 // v4 generates a NEW id, and the server needs the PREVIOUS id to recognize the
 // returning client (socket.io reconnect race: the new connection can arrive
 // before the old socket's 'disconnect' event, so the old one may still be .connected).
+//
+// RECONNECT RE-AUTH (user report 2026-11-23 "opponent's move only visible after
+// refreshing the page"): socket.io transparently re-establishes a dropped WS
+// with a NEW socket id — but the server's match still holds the OLD socket
+// object, so every 'validated' broadcast went to the dead reference. The page
+// looked alive yet received nothing until a manual reload (page load re-runs
+// tryReconnect). Fix: on every RE-connect (not the first one) replay the same
+// handshake the page load would: reconnect into our seated game (with the
+// previous socket id so the server replaces its stale slot), or re-join the
+// lobby when no game was started yet.
+let __firstConnect = true;
 socket.on('connect', () => {
+  let prevSocketId = null;
+  try { prevSocketId = sessionStorage.getItem('cherry_socketId'); } catch (e) {}
   try { sessionStorage.setItem('cherry_socketId', socket.id); } catch (e) {}
+  if (__firstConnect) { __firstConnect = false; return; }
+  // automatic reconnection after a transport drop
+  if (!tryReconnect()) sendCookie();
 });
 
 // --- Session persistence helpers ---
+// SESSIONS ARE PER-TAB (sessionStorage, not localStorage) — user report
+// 2026-11-23: two tabs of the SAME browser (e.g. two guest players on one
+// machine) shared one localStorage key: whichever tab received startGame last
+// overwrote the other's {gameId, color}, so a reload made the OTHER player
+// reconnect with the wrong color into the live player's slot (server: slot
+// occupied -> gameNotFound -> bounced to lobby / desynced seat). sessionStorage
+// survives reloads of its own tab (the reconnect case this is for) but is
+// invisible to the other tab — the correct scope. A brand-new tab now correctly
+// joins the lobby instead of hijacking a seat.
 const SESSION_KEY = 'cherry_session';
 
 function saveSession(gameId, color) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ gameId, color }));
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ gameId, color }));
 }
 
 function loadSession() {
   try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY));
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY));
   } catch { return null; }
 }
 
 function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 // --- Auth / reconnect ---
