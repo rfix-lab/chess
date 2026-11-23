@@ -1433,6 +1433,98 @@ async function test() {
     ivAsock.disconnect(); ivBsock.disconnect(); ivCsock.disconnect(); ivGsock.disconnect();
   }
 
+  // === T32 (orchestrator integration fixes, contract 32 browser smoke) ===
+  // (1) invites:list on an UNAUTHENTICATED lobby socket must resolve the user
+  //     from the handshake cookie — the LOBBY never emits 'auth' (only the game
+  //     page does), so the old `socket.data.user`-only gate dropped the request
+  //     and the invite target saw nothing. Cookie rides the polling handshake
+  //     via extraHeaders (same header the browser sends).
+  // (2) PRE-START opponent_disconnect (B3 path, zero moves) must write NO
+  //     games.csv row — a game that never started is not account history.
+  {
+    // Bogus/unregistered session cookie => the socket stays a guest => the
+    // server sends NO invites payload (guest path unchanged).
+    const lobbyA = io(BASE, { transports: ['polling'], extraHeaders: { cookie: 'sessionID=' + 't32-bogus-' + Date.now() } });
+    let badInvites = null;
+    lobbyA.on('invites', (p) => { badInvites = p; });
+    if (lobbyA.connected) lobbyA.emit('invites:list');
+    else await new Promise(r => lobbyA.on('connect', () => { lobbyA.emit('invites:list'); r(); }));
+    await sleep(1200);
+    if (badInvites === null)
+      pass('T32: invites:list with a bogus session cookie -> no invites payload (guest path unchanged)');
+    else
+      fail('T32: invites:list bogus cookie', JSON.stringify(badInvites));
+    lobbyA.close();
+  }
+
+  {
+    const t2c = 't32c_' + Math.random().toString(36).slice(2, 7);
+    const t2d = 't32d_' + Math.random().toString(36).slice(2, 7);
+    const sc = io(BASE, { transports: ['websocket'] });
+    const sd = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => sc.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => sd.on('connect', r)), sleep(3000)])
+    ]);
+    sc.emit('signup', { username: t2c, password: 't32pw1' });
+    sd.emit('signup', { username: t2d, password: 't32pw1' });
+    await sleep(400);
+    const sidC = await signinWithRetry(sc, t2c, 't32pw1');
+    const sidD = await signinWithRetry(sd, t2d, 't32pw1');
+    if (!sidC || !sidD) fail('T32.2 setup: signins', `c=${!!sidC} d=${!!sidD}`);
+    // D hosts a private match, auths; C's LOBBY-STYLE socket (no 'auth', only
+    // the handshake cookie) asks for its invites -> sees D's invite.
+    let dHost = null;
+    sd.on('private-match', (id) => { if (dHost === null) dHost = id; });
+    sd.emit('private-match', null);
+    await Promise.race([new Promise(r => sd.once('private-match', r)), sleep(3000)]);
+    if (dHost !== null) sd.emit('auth', sidD, dHost);
+    await sleep(400);
+    let dInv = null;
+    sd.on('invite:created', (x) => { dInv = x && x.matchId; });
+    sd.emit('invite:create', { targetUsername: t2c, method: 'standard' });
+    await waitFor(() => dInv !== null, 3000);
+    const lobbyC = io(BASE, { transports: ['polling'], extraHeaders: { cookie: 'sessionID=' + sidC } });
+    let cInvites = null;
+    lobbyC.on('invites', (p) => { cInvites = p; });
+    if (lobbyC.connected) lobbyC.emit('invites:list');
+    else await new Promise(r => lobbyC.on('connect', () => { lobbyC.emit('invites:list'); r(); }));
+    const gotIt = await waitFor(() => Array.isArray(cInvites) && cInvites.some(i => i.from === t2d && i.matchId === dInv), 5000);
+    if (gotIt)
+      pass('T32: invites:list on an unauthenticated socket resolves the handshake cookie -> live invite delivered (lobby flow)');
+    else
+      fail('T32: invites:list cookie fallback', JSON.stringify(cInvites));
+    lobbyC.close();
+
+    // (2) CSV gate: C invites D into a fresh invite-bound match, D's socket
+    // disconnects BEFORE any move (pre-start). games.csv must stay clean for
+    // both users even though the old row would have been written ('-' guest or
+    // reg-vs-reg): zero moves + opponent_disconnect => skip.
+    let cInv2 = null;
+    sc.on('invite:created', (x) => { cInv2 = x && x.matchId; });
+    // C needs socket.data.user too: auth C with a match of its own.
+    let cHost = null;
+    sc.on('private-match', (id) => { if (cHost === null) cHost = id; });
+    sc.emit('private-match', null);
+    await Promise.race([new Promise(r => sc.once('private-match', r)), sleep(3000)]);
+    if (cHost !== null) sc.emit('auth', sidC, cHost);
+    await sleep(400);
+    sc.emit('invite:create', { targetUsername: t2d, method: 'standard' });
+    await waitFor(() => cInv2 !== null, 3000);
+    const rowsBefore = loadGames().filter(g => g.white === t2c || g.black === t2c || g.white === t2d || g.black === t2d).length;
+    // D joins the invite-bound match (auth with matchId), then leaves pre-start.
+    sd.emit('auth', sidD, cInv2);
+    await sleep(800);
+    sd.disconnect();
+    await sleep(1500); // endMatch flush
+    const rowsAfter = loadGames().filter(g => g.white === t2c || g.black === t2c || g.white === t2d || g.black === t2d).length;
+    if (rowsAfter === rowsBefore)
+      pass('T32: pre-start opponent_disconnect writes NO games.csv row (count ' + rowsBefore + ' unchanged)');
+    else
+      fail('T32: pre-start CSV gate', `rows ${rowsBefore} -> ${rowsAfter}`);
+    sc.close(); sd.close();
+  }
+
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;
 }

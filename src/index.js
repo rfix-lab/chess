@@ -183,7 +183,12 @@ function endMatch(match, reason, lostColor) {
     if (match.player2Socket) match.player2Socket.emit('elo', eloMsg);
   }
   const eloAfter = readElos([u1, u2]);
-  if (u1 || u2) {
+  // Integration fix (orchestrator smoke): a PRE-START opponent_disconnect (the
+  // B3 immediate-end path, zero moves ever played) is not a played game — it
+  // must not pollute the account history. The client still receives gameEnd
+  // (B3 rows unchanged); only the games.csv row is skipped. Resign/checkmate
+  // with zero moves (T31 rg row) stays written — reason discriminates.
+  if ((u1 || u2) && !(reason === 'opponent_disconnect' && match.moveHistory.length === 0)) {
     const white = u1 ? u1.username : null;
     const black = u2 ? u2.username : null;
     // result from the loser's perspective (0=white, 1=black): loser undefined/draw
@@ -758,6 +763,18 @@ io.on('connection', socket => {
     privateMatch.private = true;
     matches.push(privateMatch);
     const invite = createInvite({ to: target.username, from: me.username, fromElo: Number(me.elo) || START_ELO, method: 'standard', matchId: newId });
+    // Integration fix (orchestrator smoke): real-time delivery to the TARGET.
+    // The contract says the invite "arrives" for the invited user; previously
+    // only list/push-on-auth existed, so a target with an open lobby saw
+    // nothing until reload. Push the target's live invites to every socket we
+    // can attribute to that username (data.user from 'auth' or the invites:list
+    // cookie fallback below).
+    const targetLive = listLiveInvitesTo(target.username);
+    for (const peer of io.sockets.sockets.values()) {
+      if (peer.data && peer.data.user && peer.data.user.username === target.username) {
+        peer.emit('invites', targetLive);
+      }
+    }
     dlog('invite:create: OK from=', me.username, 'to=', invite.to, 'matchId=', newId);
     socket.emit('invite:created', { matchId: newId });
   });
@@ -771,7 +788,19 @@ io.on('connection', socket => {
   // gameNotFound path (graceful). The automatic push after an authenticated
   // 'auth' uses the same listLiveInvitesTo list.
   socket.on('invites:list', () => {
-    const me = socket.data && socket.data.user;
+    // Integration fix (orchestrator smoke): the LOBBY page never emits 'auth'
+    // (only the game page does), so socket.data.user is unset there and the
+    // invites request was silently dropped — the target user saw no invite row
+    // until they re-authenticated. Resolve the user from the handshake cookie
+    // (same regex as the connection logger); caching it in socket.data.user
+    // keeps invite:create consistent for authenticated lobby sockets too.
+    let me = socket.data && socket.data.user;
+    if (!me) {
+      const cookie = socket.handshake.headers['cookie'] || '';
+      const sidMatch = cookie.match(/sessionID=([^;\s]+)/);
+      const user = sidMatch ? validateSession(users, sidMatch[1]) : null;
+      if (user) { me = user; socket.data.user = user; }
+    }
     if (!me) return; // guests have no invites (auth gate)
     const live = listLiveInvitesTo(me.username);
     dlog('invites:list: user=', me.username, 'live=', live.length);

@@ -3,14 +3,14 @@
     "port": 6361,
     "chromium": "/snap/bin/chromium",
     "serverLog": "/tmp/e2e-client-server.log",
-    "time": "2026-11-23T10:58:47.902Z"
+    "time": "2026-11-23T11:17:38.064Z"
   },
-  "matchId": "t7jlhi2o",
+  "matchId": "0udncjha",
   "rows": [
     {
       "test": "S0 both guests seated in one private match; startGame(0/1) delivered",
       "status": "PASS",
-      "detail": "white=\"Playing as white\", black=\"Playing as black\" (matchId t7jlhi2o; created by harness raw socket.io private-match — contract 32)"
+      "detail": "white=\"Playing as white\", black=\"Playing as black\" (matchId 0udncjha; created by harness raw socket.io private-match — contract 32)"
     },
     {
       "test": "S1 initial boards: normalised==start both pages; black raw==rotateBoard(start) — bug A regression",
@@ -40,7 +40,7 @@
     {
       "test": "E-ill illegal move e2->e5 (raw socket emit) -> server REJECTED + canvas shake, board unchanged",
       "status": "PASS",
-      "detail": "applied 0->0 shake=true boardUnchanged=true serverRejLine=[DEBUG] 2026-11-23T10:59:00.500Z move: REJECTED reason=illegal matchId= t7jlhi2o turnState= 0 mover-is-p1= true from= 6:"
+      "detail": "applied 0->0 shake=true boardUnchanged=true serverRejLine=[DEBUG] 2026-11-23T11:17:48.526Z move: REJECTED reason=illegal matchId= 0udncjha turnState= 0 mover-is-p1= true from= 6:"
     },
     {
       "test": "Hm1-white highlights on select(4,6) == genLegalMoves (in-page)",
@@ -50,7 +50,7 @@
     {
       "test": "M1 e2->e4 (white, drag) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=1 (expected >= 1); last: [DEBUG] 2026-11-23T10:59:01.477Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 6:4 to= 4:4"
+      "detail": "appliedLines=1 (expected >= 1); last: [DEBUG] 2026-11-23T11:17:49.473Z move: APPLIED matchId= 0udncjha turn= 0 from= 6:4 to= 4:4"
     },
     {
       "test": "S1 board SYNC after move (both pages == expected server board e2->e4)",
@@ -70,7 +70,7 @@
     {
       "test": "M2 e7->e5 (black, drag) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=2 (expected >= 2); last: [DEBUG] 2026-11-23T10:59:02.187Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 1:4 to= 3:4"
+      "detail": "appliedLines=2 (expected >= 2); last: [DEBUG] 2026-11-23T11:17:50.013Z move: APPLIED matchId= 0udncjha turn= 1 from= 1:4 to= 3:4"
     },
     {
       "test": "S2 board SYNC after move (both pages == expected server board e7->e5)",
@@ -90,7 +90,7 @@
     {
       "test": "M3 g1->h3 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=3 (expected >= 3); last: [DEBUG] 2026-11-23T10:59:02.546Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:6 to= 5:7"
+      "detail": "appliedLines=3 (expected >= 3); last: [DEBUG] 2026-11-23T11:17:50.349Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:6 to= 5:7"
     },
     {
       "test": "S3 board SYNC after move (both pages == expected server board g1->h3)",
@@ -105,7 +105,7 @@
     {
       "test": "M4 b8->c6 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=4 (expected >= 4); last: [DEBUG] 2026-11-23T10:59:02.875Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 0:1 to= 2:2"
+      "detail": "appliedLines=4 (expected >= 4); last: [DEBUG] 2026-11-23T11:17:50.663Z move: APPLIED matchId= 0udncjha turn= 1 from= 0:1 to= 2:2"
     },
     {
       "test": "S4 board SYNC after move (both pages == expected server board b8->c6)",
@@ -120,7 +120,7 @@
     {
       "test": "M5 f1->c4 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=5 (expected >= 5); last: [DEBUG] 2026-11-23T10:59:03.213Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:5 to= 4:2"
+      "detail": "appliedLines=5 (expected >= 5); last: [DEBUG] 2026-11-23T11:17:51.013Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:5 to= 4:2"
     },
     {
       "test": "S5 board SYNC after move (both pages == expected server board f1->c4)",
@@ -135,7 +135,7 @@
     {
       "test": "M6 f8->e7 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=6 (expected >= 6); last: [DEBUG] 2026-11-23T10:59:03.568Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 0:5 to= 1:4"
+      "detail": "appliedLines=6 (expected >= 6); last: [DEBUG] 2026-11-23T11:17:51.355Z move: APPLIED matchId= 0udncjha turn= 1 from= 0:5 to= 1:4"
     },
     {
       "test": "S6 board SYNC after move (both pages == expected server board f8->e7)",
@@ -155,7 +155,7 @@
     {
       "test": "M7 e1(O-O)->g1 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=7 (expected >= 7); last: [DEBUG] 2026-11-23T10:59:03.947Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:4 to= 7:6"
+      "detail": "appliedLines=7 (expected >= 7); last: [DEBUG] 2026-11-23T11:17:51.677Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:4 to= 7:6"
     },
     {
       "test": "S7 board SYNC after move (both pages == expected server board e1(O-O)->g1)",
@@ -170,7 +170,7 @@
     {
       "test": "M8 g8->f6 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=8 (expected >= 8); last: [DEBUG] 2026-11-23T10:59:04.254Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 0:6 to= 2:5"
+      "detail": "appliedLines=8 (expected >= 8); last: [DEBUG] 2026-11-23T11:17:52.002Z move: APPLIED matchId= 0udncjha turn= 1 from= 0:6 to= 2:5"
     },
     {
       "test": "S8 board SYNC after move (both pages == expected server board g8->f6)",
@@ -185,7 +185,7 @@
     {
       "test": "M9 d1->h5 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=9 (expected >= 9); last: [DEBUG] 2026-11-23T10:59:04.600Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:3 to= 3:7"
+      "detail": "appliedLines=9 (expected >= 9); last: [DEBUG] 2026-11-23T11:17:52.292Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:3 to= 3:7"
     },
     {
       "test": "S9 board SYNC after move (both pages == expected server board d1->h5)",
@@ -200,7 +200,7 @@
     {
       "test": "M10 a7->a6 (black, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=10 (expected >= 10); last: [DEBUG] 2026-11-23T10:59:04.954Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 1:0 to= 2:0"
+      "detail": "appliedLines=10 (expected >= 10); last: [DEBUG] 2026-11-23T11:17:52.607Z move: APPLIED matchId= 0udncjha turn= 1 from= 1:0 to= 2:0"
     },
     {
       "test": "S10 board SYNC after move (both pages == expected server board a7->a6)",
@@ -215,7 +215,7 @@
     {
       "test": "M11 h5->f7 (white, click) — server \"move: APPLIED\"",
       "status": "PASS",
-      "detail": "appliedLines=11 (expected >= 11); last: [DEBUG] 2026-11-23T10:59:05.302Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 3:7 to= 1:5"
+      "detail": "appliedLines=11 (expected >= 11); last: [DEBUG] 2026-11-23T11:17:52.899Z move: APPLIED matchId= 0udncjha turn= 0 from= 3:7 to= 1:5"
     },
     {
       "test": "S11 board SYNC after move (both pages == expected server board h5->f7)",
@@ -235,7 +235,7 @@
     {
       "test": "A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200)",
       "status": "PASS",
-      "detail": "user=restore_02y0qf; form hidden, Кабинет/Выход visible, success line shows the username"
+      "detail": "user=restore_6cde5g; form hidden, Кабинет/Выход visible, success line shows the username"
     },
     {
       "test": "C-err no JS console/page errors on white or black page",
@@ -244,18 +244,18 @@
     }
   ],
   "serverLog": [
-    "[DEBUG] 2026-11-23T10:59:00.500Z move: REJECTED reason=illegal matchId= t7jlhi2o turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
-    "[DEBUG] 2026-11-23T10:59:00.818Z move: REJECTED reason=illegal matchId= t7jlhi2o turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
-    "[DEBUG] 2026-11-23T10:59:01.477Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 6:4 to= 4:4",
-    "[DEBUG] 2026-11-23T10:59:02.187Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 1:4 to= 3:4",
-    "[DEBUG] 2026-11-23T10:59:02.546Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:6 to= 5:7",
-    "[DEBUG] 2026-11-23T10:59:02.875Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 0:1 to= 2:2",
-    "[DEBUG] 2026-11-23T10:59:03.213Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:5 to= 4:2",
-    "[DEBUG] 2026-11-23T10:59:03.568Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 0:5 to= 1:4",
-    "[DEBUG] 2026-11-23T10:59:03.947Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:4 to= 7:6",
-    "[DEBUG] 2026-11-23T10:59:04.254Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 0:6 to= 2:5",
-    "[DEBUG] 2026-11-23T10:59:04.600Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 7:3 to= 3:7",
-    "[DEBUG] 2026-11-23T10:59:04.954Z move: APPLIED matchId= t7jlhi2o turn= 1 from= 1:0 to= 2:0",
-    "[DEBUG] 2026-11-23T10:59:05.302Z move: APPLIED matchId= t7jlhi2o turn= 0 from= 3:7 to= 1:5"
+    "[DEBUG] 2026-11-23T11:17:48.526Z move: REJECTED reason=illegal matchId= 0udncjha turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
+    "[DEBUG] 2026-11-23T11:17:48.829Z move: REJECTED reason=illegal matchId= 0udncjha turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
+    "[DEBUG] 2026-11-23T11:17:49.473Z move: APPLIED matchId= 0udncjha turn= 0 from= 6:4 to= 4:4",
+    "[DEBUG] 2026-11-23T11:17:50.013Z move: APPLIED matchId= 0udncjha turn= 1 from= 1:4 to= 3:4",
+    "[DEBUG] 2026-11-23T11:17:50.349Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:6 to= 5:7",
+    "[DEBUG] 2026-11-23T11:17:50.663Z move: APPLIED matchId= 0udncjha turn= 1 from= 0:1 to= 2:2",
+    "[DEBUG] 2026-11-23T11:17:51.013Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:5 to= 4:2",
+    "[DEBUG] 2026-11-23T11:17:51.355Z move: APPLIED matchId= 0udncjha turn= 1 from= 0:5 to= 1:4",
+    "[DEBUG] 2026-11-23T11:17:51.677Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:4 to= 7:6",
+    "[DEBUG] 2026-11-23T11:17:52.002Z move: APPLIED matchId= 0udncjha turn= 1 from= 0:6 to= 2:5",
+    "[DEBUG] 2026-11-23T11:17:52.292Z move: APPLIED matchId= 0udncjha turn= 0 from= 7:3 to= 3:7",
+    "[DEBUG] 2026-11-23T11:17:52.607Z move: APPLIED matchId= 0udncjha turn= 1 from= 1:0 to= 2:0",
+    "[DEBUG] 2026-11-23T11:17:52.899Z move: APPLIED matchId= 0udncjha turn= 0 from= 3:7 to= 1:5"
   ]
 }
