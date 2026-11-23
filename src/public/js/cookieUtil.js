@@ -14,7 +14,13 @@ function writeCookie(name, value, days) {
 }
 
 function readCookie(name) {
-  return document.cookie.split('; ').find(row => row.split('=')[0] === name);
+  // BUGFIX (user-mode browser audit): the H5 dedup copy returned the whole
+  // "name=value" ROW instead of the value. Both call sites (game page 'auth'
+  // and 'reconnect') need the VALUE: the server received "sessionID=<hex>"
+  // as the session id -> validateSession unknown-session -> authFailed ->
+  // EVERY signed-in user was bounced from /game back to /index.
+  const row = document.cookie.split('; ').find(r => r.split('=')[0] === name);
+  return row ? row.slice(name.length + 1) : null;
 }
 
 function deleteCookie(name) {
