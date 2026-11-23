@@ -917,13 +917,16 @@ async function test() {
       pass('T30 seat-elo: registered vs guest -> { own: ' + seatUnrated.own + ', rated: false, opponent: null }');
     else fail('T30 seat-elo: registered-vs-guest shape', JSON.stringify(u1Elos));
 
-    // Phase 2: FRESH match #2 (B3 ends match #1 immediately when U
-    // disconnects pre-start, so its id is dead — do not reuse it). Fresh
-    // guest G2 joins first; U2 (registered) joins after.
-    seU.disconnect();
-    await sleep(300);
+    // Phase 2: FRESH match #2 (B3 ends match #1 on U's pre-start disconnect,
+    // so its id is dead — a fresh match is required). Order matters: U must
+    // still be CONNECTED when it emits 'private-match' (a disconnected socket's
+    // packets are dropped server-side, so the match would never be created),
+    // and the disconnect comes AFTER creation — it ends match #1, but U is
+    // only the CREATOR of match #2 (never seated in it), so match #2 survives.
     seU.emit('private-match', null);
     await Promise.race([new Promise(r => seU.once('private-match', r)), sleep(3000)]);
+    seU.disconnect();
+    await sleep(300);
     await sleep(700);
     if (seU2s) seU2.emit('auth', seU2s, seMatch2);
     await sleep(1000);
