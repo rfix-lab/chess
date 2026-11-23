@@ -1,235 +1,239 @@
-/* === Lobby page — modern clean look (contract 32 redesign) ===
-   Self-contained: no JS dependency. Adapts to the OS colour scheme and,
-   when present, to a data-theme attribute on <html> (game-theme parity).
+/* === Lobby page (contract 36c redesign on shared tokens.css) ===
+   The page shell uses tokens.css for the palette/typography and for the
+   .hide/.show visibility mechanism (JS toggles the classList — the only
+   mechanism; do not replace it).
    JS-referenced ids/classes kept exactly (indexSockets.js / events.js):
    form, form-title, submit-auth, username, username-list, password,
-   play-button, auth-success, auth-fail, signup-fail(-*), invites,
-   invites-list, authed, account-link, logout-button, .hide, .show */
+   play-button, users-button, login-button, register-button, auth-success,
+   auth-fail, signup-fail(-*), invites, invites-list, invite-row,
+   invite-accept, authed, account-link, logout-button, .hide, .show */
 
-:root {
-  --bg-0: #0f1420;
-  --bg-1: #16203a;
-  --text: #e8ecf4;
-  --text-dim: #9aa4b8;
-  --card: #1a2436;
-  --card-border: rgba(255, 255, 255, 0.08);
-  --input-bg: #101827;
-  --input-border: #2c3850;
-  --input-focus: #6c8cff;
-  --accent: #6c8cff;
-  --accent-hover: #8099ff;
-  --accent-ink: #ffffff;
-  --shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
-  --radius: 16px;
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    --bg-0: #f2f5fb;
-    --bg-1: #e8edf8;
-    --text: #1f2430;
-    --text-dim: #5b6577;
-    --card: #ffffff;
-    --card-border: rgba(20, 30, 60, 0.08);
-    --input-bg: #f7f9fd;
-    --input-border: #d6ddef;
-    --input-focus: #4a63d8;
-    --accent: #4a63d8;
-    --accent-hover: #5f76e6;
-    --accent-ink: #ffffff;
-    --shadow: 0 18px 44px rgba(30, 45, 90, 0.16);
-  }
-}
-
-:root[data-theme="light"] {
-  --bg-0: #f2f5fb;
-  --bg-1: #e8edf8;
-  --text: #1f2430;
-  --text-dim: #5b6577;
-  --card: #ffffff;
-  --card-border: rgba(20, 30, 60, 0.08);
-  --input-bg: #f7f9fd;
-  --input-border: #d6ddef;
-  --input-focus: #4a63d8;
-  --accent: #4a63d8;
-  --accent-hover: #5f76e6;
-  --accent-ink: #ffffff;
-  --shadow: 0 18px 44px rgba(30, 45, 90, 0.16);
-  color-scheme: light;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
 body {
   margin: 0;
   min-height: 100vh;
-}
-
-body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 16px;
+  padding: var(--sp-6) var(--sp-4);
   background:
-    radial-gradient(1200px 700px at 20% -10%, var(--bg-1), transparent 60%),
+    radial-gradient(1200px 700px at 20% -10%, var(--bg-glow), transparent 60%),
     linear-gradient(160deg, var(--bg-0), var(--bg-1));
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  transition: background 0.3s, color 0.3s;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: var(--lh);
+  transition: background var(--t), color var(--t);
+}
+
+.lobby-shell {
+  width: min(92vw, 440px);
 }
 
 /* --- Brand header --- */
 .brand {
   text-align: center;
-  margin: 0 0 6px;
+  margin: 0 0 var(--sp-2);
 }
 
 .brand h1 {
   margin: 0;
-  font-size: 30px;
+  font-size: var(--fs-3xl);
   font-weight: 800;
   letter-spacing: -0.5px;
 }
 
 .brand p {
-  margin: 6px 0 0;
+  margin: var(--sp-1) 0 0;
   color: var(--text-dim);
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 
-/* --- Big action stack (contract 32) ---
-   [Вход] and [Играть] each >= 56px; [Регистрация] same width, ~40px.
-   All same width so the stack reads as one column of equal cards. */
+/* --- Big action stack.
+   [Играть] is the ONE saturated element on the page (primary, accent fill,
+   60px) — the visually dominant card. [Пользователи] and [Вход] are
+   secondary surface cards at the same height; [Регистрация] is the quiet
+   ghost. Equal widths keep the stack reading as one object. */
 .action-stack {
-  width: min(92vw, 420px);
-  margin: 18px 0;
+  width: 100%;
+  margin: var(--sp-4) 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--sp-2);
 }
 
 .big-btn {
   width: 100%;
-  height: 60px;               /* >= 56px */
+  height: 60px;               /* >= 56px contract 32 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--card);
-  border: 1px solid var(--card-border);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  font-family: var(--font);
   font-size: 19px;
   font-weight: 700;
   color: var(--text);
-  border-radius: var(--radius);
-  transition: transform 0.08s, background 0.2s, border-color 0.2s, color 0.2s;
-}
-
-#login-button {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-#login-button:hover { background: var(--accent-hover); }
-
-#play-button {
-  background: var(--card);
-}
-#play-button:hover {
-  background: var(--input-bg);
-  border-color: var(--input-focus);
+  cursor: pointer;
+  transition: transform var(--t-fast), background var(--t),
+    border-color var(--t), color var(--t);
 }
 
 .big-btn:active {
   transform: translateY(1px);
 }
 
-/* [Регистрация] — same width, shorter (~40px), quieter style */
+.big-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* [Играть] — primary: the saturated card. */
+#play-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-2);
+}
+
+#play-button:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+#play-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+#play-button:active {
+  transform: translateY(1px);
+}
+
+/* [Пользователи] — secondary card, same footprint as [Играть]. */
+#users-button {
+  background: var(--card);
+  border-color: var(--line);
+}
+
+#users-button:hover {
+  border-color: var(--line-strong);
+  background: var(--card-2);
+}
+
+/* [Вход] — secondary (was accent in contract 32; demoted: login is not the
+   page's main action, [Играть] is). */
+#login-button {
+  background: var(--card);
+  border-color: var(--line);
+}
+
+#login-button:hover {
+  border-color: var(--line-strong);
+  background: var(--card-2);
+}
+
+/* [Регистрация] — ghost: same width, shorter (~40px), quietest card. */
 .mid-btn {
   width: 100%;
   height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
-  border: 1px dashed var(--card-border);
-  border-radius: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
   color: var(--text-dim);
-  font-size: 15px;
+  font-family: var(--font);
+  font-size: var(--fs-md);
   font-weight: 600;
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  cursor: pointer;
+  transition: color var(--t), border-color var(--t), background var(--t);
 }
+
 .mid-btn:hover {
   color: var(--text);
-  border-color: var(--input-focus);
-  background: var(--input-bg);
+  border-color: var(--accent);
+  background: var(--card-2);
 }
+
 .mid-btn:active {
   transform: translateY(1px);
 }
 
 /* --- Auth card (login / registration form) --- */
 .auth-card {
-  width: min(92vw, 420px);
-  margin: 14px 0;
+  width: 100%;
+  margin: var(--sp-3) 0;
   background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 24px 26px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-5) 26px;
 }
 
 .auth-card h2 {
-  margin: 0 0 6px 0;
-  font-size: 18px;
-  font-weight: 700;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-xl);
+  font-weight: 800;
 }
 
 .field {
-  margin-top: 14px;
+  margin-top: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--sp-2);
 }
 
 .field label {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-dim);
 }
 
 .field input {
   width: 100%;
+  min-height: 44px;
   padding: 11px 13px;
-  font-size: 15px;
+  font-size: var(--fs-md);
+  font-family: var(--font);
   color: var(--text);
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
+  background: var(--card-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--t), box-shadow var(--t);
 }
 
 .field input:focus {
-  border-color: var(--input-focus);
-  box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.22);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .actions {
   display: flex;
-  gap: 10px;
-  margin-top: 18px;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
 }
 
-/* --- Generic buttons (auth card) --- */
+.actions button {
+  flex: 1;
+  min-height: 48px;
+}
+
+/* --- Generic buttons used inside the auth card --- */
 button {
-  font-family: inherit;
+  font-family: var(--font);
   cursor: pointer;
   border: none;
   border-radius: 10px;
-  font-size: 15px;
+  font-size: var(--fs-md);
   font-weight: 600;
   padding: 11px 18px;
   color: var(--text);
   background: transparent;
-  transition: background 0.2s, transform 0.08s, box-shadow 0.2s;
+  transition: background var(--t), transform var(--t-fast), box-shadow var(--t);
 }
 
 button:active {
@@ -238,83 +242,99 @@ button:active {
 
 .btn-primary {
   flex: 1;
+  min-height: 48px;
   background: var(--accent);
+  border: 1px solid var(--accent);
   color: var(--accent-ink);
 }
 
 .btn-primary:hover {
-  background: var(--accent-hover);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.btn-primary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .btn-secondary {
-  border: 1px solid var(--input-border);
-  background: var(--input-bg);
+  min-height: 48px;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--text);
 }
 
 .btn-secondary:hover {
-  border-color: var(--input-focus);
+  border-color: var(--accent);
 }
 
-/* --- Invites section (contract 32 §3) --- */
+/* --- Invites section.
+   Visually distinct from the other cards: an accent left strip marks a
+   pending invitation as "someone is waiting on you" without shouting. --- */
 .invites {
-  width: min(92vw, 420px);
-  margin: 12px 0;
+  width: 100%;
+  margin: var(--sp-3) 0;
   background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  padding: 18px 22px 18px;
-  box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) 22px;
+  box-shadow: var(--shadow-2);
 }
 
 .invites h2 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
-  font-weight: 700;
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-lg);
+  font-weight: 800;
 }
 
 #invites-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .invite-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--sp-3);
   padding: 10px 12px;
-  background: var(--input-bg);
-  border: 1px solid var(--card-border);
+  background: var(--card-2);
+  border: 1px solid var(--line);
   border-radius: 10px;
 }
 
 .invite-label {
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--text);
 }
 
 .invite-accept {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 16px;
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--accent-ink);
   background: var(--accent);
-  padding: 7px 16px;
-  border-radius: 8px;
-  transition: background 0.2s, transform 0.08s;
+  border-radius: var(--r-sm);
+  transition: background var(--t), transform var(--t-fast);
 }
 
 .invite-accept:hover {
-  background: var(--accent-hover);
+  background: var(--accent-strong);
   transform: translateY(-1px);
 }
 
-/* --- Authenticated controls (visible when logged in) --- */
+/* --- Authenticated controls (Кабинет / Выйти pill pair) --- */
 .authed {
-  width: min(92vw, 420px);
-  margin: 12px 0;
+  width: 100%;
+  margin: var(--sp-3) 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -322,26 +342,30 @@ button:active {
 }
 
 .account-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 18px;
   text-decoration: none;
-  font-size: 15px;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--accent);
-  padding: 8px 18px;
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
   background: var(--card);
-  transition: border-color 0.2s, background 0.2s;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  transition: border-color var(--t), background var(--t);
 }
 
 .account-link:hover {
-  border-color: var(--input-focus);
-  background: var(--input-bg);
+  border-color: var(--accent);
+  background: var(--card-2);
 }
 
 .logout-btn {
-  font-size: 14px;
+  min-height: 40px;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 16px;
   background: transparent;
@@ -349,48 +373,39 @@ button:active {
 
 .logout-btn:hover {
   color: var(--text);
-  border-color: var(--input-focus);
-  background: var(--input-bg);
+  border-color: var(--line-strong);
+  background: var(--card-2);
 }
 
 /* --- Feedback banners --- */
 .auth-note {
-  width: min(92vw, 420px);
-  margin: 14px 0 0;
+  width: 100%;
+  margin: var(--sp-3) 0 0;
   padding: 12px 14px;
   border-radius: 10px;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 500;
   text-align: center;
 }
 
 #auth-success {
-  color: #2f9e6b;
-  background: rgba(47, 158, 107, 0.12);
-  border: 1px solid rgba(47, 158, 107, 0.35);
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok);
 }
 
 #auth-success h3,
 #signup-fail h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 #auth-fail,
 #signup-fail {
-  color: #e0654f;
-  background: rgba(224, 101, 79, 0.12);
-  border: 1px solid rgba(224, 101, 79, 0.35);
-}
-
-/* Utility: JS toggles these */
-.hide {
-  display: none !important;
-}
-
-.show {
-  display: initial;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
 }
 
 @media (max-width: 460px) {

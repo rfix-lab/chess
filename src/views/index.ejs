@@ -7,6 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Шахматы</title>
 
+  <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/index.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <script src="/socket.io/socket.io.js"></script>
@@ -14,6 +15,7 @@
 </head>
 
 <body>
+  <div class="lobby-shell">
   <header class="brand">
     <h1>♞ Шахматы</h1>
     <p>Войдите или сразу сыграйте</p>
@@ -62,13 +64,14 @@
 
   <div id="auth-success" class="auth-note hide"></div>
   <div id="auth-fail" class="auth-note hide">
-    <h3>Неверный логин или пароль.</h3>
+    <h3>Неверный логин или пароль</h3>
   </div>
   <div id="signup-fail" class="auth-note hide">
-    <h3 id="signup-fail-usrnmexists" class="hide">Не удалось! Имя уже занято.</h3>
-    <h3 id="signup-fail-pswdlen" class="hide">Не удалось! Введите непустой пароль.</h3>
-    <h3 id="signup-fail-pswdinvalid" class="hide">Не удалось! Имя: 3–32 символа — буквы, цифры, точка, подчёркивание, дефис.</h3>
+    <h3 id="signup-fail-usrnmexists" class="hide">Имя уже занято</h3>
+    <h3 id="signup-fail-pswdlen" class="hide">Введите непустой пароль</h3>
+    <h3 id="signup-fail-pswdinvalid" class="hide">Имя: 3–32 символа — буквы, цифры, точка, подчёркивание, дефис</h3>
   </div>
+  </div><!-- /.lobby-shell -->
 
   <script src="js/cookieUtil.js"></script>
   <!-- Integration fix (contract 36): index.js defines the global `play` used by
