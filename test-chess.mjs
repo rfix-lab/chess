@@ -610,7 +610,9 @@ async function test() {
   r2.on('replay', m => { rReplay2 = m; });
   r1.emit('auth', null, null);
   r2.emit('auth', null, null);
-  await sleep(500);
+  // hardened 500 -> 1200 (same load-flake class as the guest seating wait:
+  // parallel headless e2e inflates the seat round-trip -> rMatch stays null).
+  await sleep(1200);
 
   if (rMatch !== null) {
     // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
@@ -903,13 +905,13 @@ async function test() {
     seU3.on('private-match', (id) => { if (seMatch3 === null) { seMatch3 = id; seU.emit('auth', seU1s, id); } });
     seU.emit('private-match', null);
     await Promise.race([new Promise(r => seU.once('private-match', r)), sleep(3000)]);
-    await sleep(300);
+    await sleep(700);
     if (guestEloSeen === null)
       pass('T30 seat-elo: guest seated FIRST gets no seat-elo emission');
     else fail('T30 seat-elo: guest should get no seat elo', JSON.stringify(guestEloSeen));
 
     if (seU1s) seU.emit('auth', seU1s, seMatch1);
-    await sleep(500);
+    await sleep(1000);
     const seatUnrated = u1Elos[0];
     if (seatUnrated && typeof seatUnrated.own === 'number' && seatUnrated.rated === false && seatUnrated.opponent === null)
       pass('T30 seat-elo: registered vs guest -> { own: ' + seatUnrated.own + ', rated: false, opponent: null }');
@@ -922,9 +924,9 @@ async function test() {
     await sleep(300);
     seU.emit('private-match', null);
     await Promise.race([new Promise(r => seU.once('private-match', r)), sleep(3000)]);
-    await sleep(300);
+    await sleep(700);
     if (seU2s) seU2.emit('auth', seU2s, seMatch2);
-    await sleep(500);
+    await sleep(1000);
     if (u2SeatElo && typeof u2SeatElo.own === 'number' && u2SeatElo.rated === false && u2SeatElo.opponent === null)
       pass('T30 seat-elo: registered (U2) vs fresh guest -> rated: false, opponent: null');
     else fail('T30 seat-elo: U2-vs-fresh-guest shape', JSON.stringify(u2SeatElo));
@@ -939,9 +941,9 @@ async function test() {
     // with opponent = the other player's own elo (reciprocal).
     seU3.emit('private-match', null);
     await Promise.race([new Promise(r => seU3.once('private-match', r)), sleep(3000)]);
-    await sleep(300);
+    await sleep(700);
     if (seU2s) seU2.emit('auth', seU2s, seMatch3);
-    await sleep(500);
+    await sleep(1000);
     const u1Rated = u1Elos[u1Elos.length - 1];
     const u2Rated = u2SeatElo; // u2SeatElo holds U2's LATEST emission (the phase-3 one)
     if (u1Rated && u1Rated !== seatUnrated && typeof u1Rated.own === 'number' && u1Rated.rated === true &&
