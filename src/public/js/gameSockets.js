@@ -56,10 +56,13 @@ function clearSession() {
 sendCookie = () => {
   let sessionID = readCookie('sessionID');
 
-  if (matchId == "")
+  if (matchId === "" || matchId === null || matchId === undefined)
     matchId = null;
   else
-    matchId = Number(matchId);
+    // T30 (2026-11-23): match ids are opaque 8-char strings — the old
+    // Number(matchId) turned them into NaN which the server received as null,
+    // silently dropping private-link players into PUBLIC matchmaking.
+    matchId = String(matchId);
 
   socket.emit('auth', sessionID, matchId);
 };
@@ -506,8 +509,30 @@ socket.on('replay', (moves) => {
 
 let myElo = null;
 let oppElo = null;
+// Requirement 5 (2026-11-23): registered users always see their internal Elo.
+// Server contract (checkpoint/30): the 'elo' event has TWO payload shapes —
+// SEAT {own, rated, opponent} sent once per seating/reconnect to a REGISTERED
+// socket only, and GAME-END {player1, player2}. Disambiguated by key types.
+let eloOwn = null;
+let eloOpp = null; // opponent's elo, null => unrated pairing (guest)
+function renderEloBadge() {
+  const el = document.getElementById('eloBadge');
+  if (!el) return;
+  if (eloOwn === null) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerText = eloOpp === null
+    ? `Elo: ${eloOwn} — игра с гостем, рейтинг не меняется`
+    : `Elo: ${eloOwn} · соперник: ${eloOpp}`;
+}
 socket.on('elo', (data) => {
-  // player1 = white = color 0, player2 = black = color 1
+  if (data && typeof data.own === 'number') {
+    // SEAT payload
+    eloOwn = data.own;
+    eloOpp = (data.rated && typeof data.opponent === 'number') ? data.opponent : null;
+    renderEloBadge();
+    return;
+  }
+  // player1 = white = color 0, player2 = black = color 1 (game-end payload)
   if (my_color === 0) {
     myElo = data.player1;
     oppElo = data.player2;
@@ -515,6 +540,10 @@ socket.on('elo', (data) => {
     myElo = data.player2;
     oppElo = data.player1;
   }
+  // keep the badge in step with the post-game update
+  eloOwn = myElo;
+  eloOpp = oppElo;
+  renderEloBadge();
 });
 
 // return from server on whether a move was validated or not
@@ -566,6 +595,12 @@ socket.on('validated', (boardState, turnState, extra) => {
   // F3: adopt the server-authoritative lastMove (server coords, same shape as
   // the local one) so EP targets of the opponent's double push are computed.
   if (extra && extra.lastMove) lastMove = extra.lastMove;
+  // Test-harness snapshot: the server-authoritative board in SERVER orientation
+  // with raw indicator bits, immune to the replay browser rewriting the global
+  // board (showReplay -> applyReplayPosition(0) resets it to the start position
+  // the instant the end modal reveals the replay, racing the E2E final-board
+  // assertion). __chessDebug exposes the same global for other probes.
+  window.__lastValidatedRaw = boardState.map(r => r.slice());
   // Clear click-to-move selection after server response
   selectedSquare = null;
   legalMoveSquares.clear();

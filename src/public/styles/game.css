@@ -198,6 +198,19 @@ body {
   transition: color 0.3s, background 0.3s, border-color 0.3s;
 }
 
+/* Internal Elo badge (registered users only; hidden until the seat event). */
+.elo-badge {
+  text-align: center;
+  color: var(--text-dim, var(--status-color));
+  font-size: 13px;
+  margin: -4px 0 10px;
+  padding: 4px 14px;
+  width: fit-content;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+}
+
 canvas#cnv {
   display: block;
   touch-action: none;
