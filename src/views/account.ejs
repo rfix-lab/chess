@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!-- PLACEHOLDER (S-A): contract 32 says S-B owns this page's markup. This stub
+     only proves the server route + data pipeline: it renders the same fields
+     the final page will use. S-B will replace the body while keeping the
+     server-provided locals: username, elo, played,
+     games: [{date, opponent, result (win|loss|draw, from MY view),
+              method ('стандартная'), eloBefore, eloAfter}] newest first. -->
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Кабинет</title>
+</head>
+
+<body>
+  <h1>Кабинет: <%= username %></h1>
+  <p>Elo: <%= elo %></p>
+  <p>Сыграно партий: <%= played %></p>
+  <pre id="account-data"><%= JSON.stringify({ username, elo, played, games }, null, 2) %></pre>
+</body>
+
+</html>
