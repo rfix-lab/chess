@@ -34,6 +34,9 @@ re-run ONCE; on second failure it is real.
       invite.from (inviter; white/first seat); anyone else -> gameNotFound. Plain
       private matches (invite=null) keep open-join semantics. index.js 'auth' path passes
       getInviteByMatch(matchId). npm test green.
+- [ ] 7a. (contract addendum 2026-11-23) index.js GET /api/me: parse sessionID cookie
+      (same regex as socket handshake logger), validateSession -> 200 {username, elo} or
+      401 {}. Thin route. T31 row: valid cookie -> 200 username; absent/bogus -> 401.
 - [ ] 7. index.js GET /account: sessionID cookie -> user (same lookup as the socket
       handshake log); else redirect to /. Renders account.ejs with
       {username, elo, games:[{date, opponent, result: win|loss|draw (from MY view),

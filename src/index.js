@@ -594,9 +594,9 @@ io.on('connection', socket => {
 
     // T31 (contract 32, event 3): push this user's LIVE invites right after a
     // successful authenticated auth — a fresh lobby page shows them without an
-    // extra round-trip. Guests (no socket.data.user) get nothing.
-    if (user) {
-      socket.emit('invites', listLiveInvitesTo(user.username));
+    // extra round-trip. Guests (socket.data.user still null) get nothing.
+    if (socket.data.user) {
+      socket.emit('invites', listLiveInvitesTo(socket.data.user.username));
     }
 
     if (matchId === null) {
@@ -609,7 +609,17 @@ io.on('connection', socket => {
       // invite.from may join; plain private matches pass null and stay open).
       const invite = getInviteByMatch(matchId);
       dlog('auth: routing to findPrivateMatch socket=', socket.id, 'matchId=', matchId, 'invite=', invite ? invite.to : null);
-      findPrivateMatch(socket, matchId, invite); // if func returns 0, no private match exists with that matchID (invalid link)
+      // T31: a well-formed id (genMatchId's 8-char shape) that is either absent
+      // from the pool (e.g. the server restarted — the match lives in RAM only)
+      // or was refused by the invite check is a REAL "no game" for the client:
+      // emit gameNotFound so the page can react. Malformed/stale ids keep the
+      // old silent miss (T30 rows: uppercase / short / integer ids must not
+      // produce an emission).
+      const found = findPrivateMatch(socket, matchId, invite); // if 0, no private match with that id (invalid link)
+      if (found === 0 && invite && typeof matchId === 'string' && /^[a-z0-9]{8}$/.test(matchId)) {
+        dlog('auth: gameNotFound (invite-bound match dead or join refused) matchId=', matchId, 'socketUser=', (socket.data.user && socket.data.user.username) || 'guest');
+        socket.emit('gameNotFound');
+      }
     }
     // use sessionID to identify the user
     // if sessionID is undefined, then the user plays as a guest
