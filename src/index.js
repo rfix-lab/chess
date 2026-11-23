@@ -119,8 +119,14 @@ function endMatch(match, reason, lostColor) {
     if (loser === undefined || reason === 'draw') return 'draw';
     return color === loser ? 'loss' : 'win';
   };
-  if (match.player1Socket) match.player1Socket.emit('gameEnd', { reason, result: resultFor(0) });
-  if (match.player2Socket) match.player2Socket.emit('gameEnd', { reason, result: resultFor(1) });
+  // T33 (contract 36): the method the match carried (invite:create stored it
+  // on the match) rides the gameEnd payload end-to-end. Public matches and
+  // plain private matches carry no method -> 'standard'. NOTE: rapid does NOT
+  // yet change clocks — the game currently has no clock at all; the method is
+  // carried so the real clock feature can land later without schema churn.
+  const methodLabel = match.method && match.method !== 'standard' ? match.method : 'standard';
+  if (match.player1Socket) match.player1Socket.emit('gameEnd', { reason, result: resultFor(0), method: methodLabel });
+  if (match.player2Socket) match.player2Socket.emit('gameEnd', { reason, result: resultFor(1), method: methodLabel });
 
   // F3: replay — send both players the full move history right after gameEnd
   // (the match is already spliced, so the client must keep the history itself —
@@ -204,7 +210,9 @@ function endMatch(match, reason, lostColor) {
       whiteEloBefore: eloBefore[0],
       whiteEloAfter: eloAfter[0],
       blackEloBefore: eloBefore[1],
-      blackEloAfter: eloAfter[1]
+      blackEloAfter: eloAfter[1],
+      // T33 (contract 36): trailing 10th CSV column (missing -> 'standard').
+      method: match.method || 'standard'
     });
     dlog('endMatch: games.csv appended matchId=', match.matchId, 'result=', result, 'white=', white || '-', 'black=', black || '-');
   } else {
