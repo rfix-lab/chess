@@ -496,3 +496,12 @@ canvas#cnv {
 
 /* === Toast (shared component from tokens.css — the animation lives there).
    The page previously carried its own .toast; it is unified there now. === */
+
+/* contract-37 S3: explicit glyph colors for captured-pieces strips.
+   sprites[] maps BOTH piece colors to the SAME solid chess glyphs, so the
+   HTML strips (.cap-piece spans) rely on CSS color alone to distinguish:
+   black pieces captured BY white -> .cap-dark, white pieces captured BY
+   black -> .cap-light. Strokes/shadows give contrast on both dark and light
+   themes. No earlier .cap-piece rule sets color, so nothing conflicts. */
+.cap-piece.cap-dark { color:#11161f; -webkit-text-stroke:.6px rgba(233,238,249,.75); text-shadow:0 0 2px rgba(233,238,249,.35); }
+.cap-piece.cap-light { color:#eef2fb; -webkit-text-stroke:.6px rgba(17,22,31,.75); text-shadow:0 0 2px rgba(0,0,0,.5); }

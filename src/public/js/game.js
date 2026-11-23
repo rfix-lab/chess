@@ -453,15 +453,10 @@ function completeDrag(px, py) {
     to_position = { x: j, y: i };
     dragSettled = true;
 
-    // Detect capture
-    if ((old_piece & 0b0111) !== blank) {
-        const capturedType = old_piece & 0b0111;
-        if (my_color === white) {
-            capturedByWhite.push(capturedType);
-        } else {
-            capturedByBlack.push(capturedType);
-        }
-    }
+    // CONTRACT 37 S3: the speculative capture bookkeeping here is deleted —
+    // it pushed types on emit, so rejected moves and EP captures desynced the
+    // strips. The captured lists are now DERIVED from the live board in
+    // renderCapturedPieces(); old_piece stays for the emit payload.
 
     // send movement data to the server (visual -> server via the seam;
     // identity for white, 180-degree rotation for black)
@@ -731,20 +726,46 @@ function renderCapturedPieces() {
     const blackRow = document.getElementById('captured-black');
     if (!whiteRow || !blackRow) return;
 
-    let whiteHtml = '';
-    let blackHtml = '';
+    // CONTRACT 37 S3: lists are DERIVED from the live `board` array instead
+    // of the old push-on-emit bookkeeping (which desynced on rejected moves
+    // and en-passant). A (color,type) is counted as present; captured count
+    // per (color,type) = max(0, expected initial - present). White captures
+    // black pieces, black captures white.
+    const expected = { [pawn]: 8, [knight]: 2, [bishop]: 2, [rook]: 2, [queen]: 1, [king]: 1 };
+    const present = { [pawn]: { [white]: 0, [black]: 0 }, [knight]: { [white]: 0, [black]: 0 }, [bishop]: { [white]: 0, [black]: 0 }, [rook]: { [white]: 0, [black]: 0 }, [queen]: { [white]: 0, [black]: 0 }, [king]: { [white]: 0, [black]: 0 } };
+    for (let i = 0; i < no_of_squares; i++) {
+        for (let j = 0; j < no_of_squares; j++) {
+            // mask the indicator bits (>= 0b10000: last-move/check/EP tints)
+            const v = board[i][j] & 0b1111;
+            if (v === blank) continue;
+            const c = v & 0b1000;
+            const t = v & 0b0111;
+            if (present[t]) present[t][c]++;
+        }
+    }
+    const captured = {};
+    for (const t in expected) {
+        // promotion can hand out more than the initial set, so never go below 0
+        captured[t] = {
+            [white]: Math.max(0, expected[t] - present[t][white]),
+            [black]: Math.max(0, expected[t] - present[t][black]),
+        };
+    }
 
-    // White's captures (black pieces taken by white)
-    sortCaptured(capturedByWhite).forEach(p => {
-        const sym = sprites[black | p];
-        if (sym) whiteHtml += `<span class="cap-piece">${sym}</span>`;
-    });
+    const piecesByWhite = [];
+    const piecesByBlack = [];
+    for (const t in captured) {
+        for (let k = 0; k < captured[t][black]; k++) piecesByWhite.push(t);
+        for (let k = 0; k < captured[t][white]; k++) piecesByBlack.push(t);
+    }
 
-    // Black's captures (white pieces taken by black)
-    sortCaptured(capturedByBlack).forEach(p => {
-        const sym = sprites[white | p];
-        if (sym) blackHtml += `<span class="cap-piece">${sym}</span>`;
-    });
+    // SPRITES FIX NOTE: sprites maps BOTH colors to the SAME solid glyphs, so
+    // HTML strips need CSS color to distinguish — .cap-dark / .cap-light
+    // (appended at the end of styles/game.css, block marked contract-37 S3).
+    const whiteHtml = sortCaptured(piecesByWhite)
+        .map(t => `<span class="cap-piece cap-dark">${sprites[black | t]}</span>`).join('');
+    const blackHtml = sortCaptured(piecesByBlack)
+        .map(t => `<span class="cap-piece cap-light">${sprites[white | t]}</span>`).join('');
 
     // For the player's view: show their captures below, opponent's above
     if (my_color === white) {
