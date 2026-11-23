@@ -236,7 +236,7 @@ try {
     'black seated as black');
   await sleep(300);
   logRow('S0 both guests seated in one private match; startGame(0/1) delivered', 'PASS',
-    `white="${await white.page.evaluate(() => document.getElementById('status').innerText)}", black="${await black.page.evaluate(() => document.getElementById('status').innerText)}" (matchId ${matchId})`);
+    `white="${await white.page.evaluate(() => document.getElementById('status').innerText)}", black="${await black.page.evaluate(() => document.getElementById('status').innerText)}" (matchId ${matchId}; created by harness raw socket.io private-match — contract 32)`);
 
   // ---------- move-driver (viewport pixel coords from the PAGE's own layout) ----------
   async function squarePx(page, x, y) {
@@ -522,6 +522,30 @@ try {
     const svFrom = toXY(m.w), svTo = toXY(m.b); // server coords
     const vFrom = (m.side === 0) ? svFrom : rot(svFrom.x, svFrom.y);
     const vTo = (m.side === 0) ? svTo : rot(svTo.x, svTo.y);
+
+    // Wait until the MOVER page has caught up to the server turn (can_move===true,
+    // the client's own "it's my turn" flag that gates input) and is idle before
+    // clicking. can_move is the correct in-page signal — the STATUS text is NOT:
+    // a freshly seated white page reports "Playing as white" (never "Your turn"),
+    // so matching on the status string deadlocked step 1. The raw-socket seating
+    // has less latency than the old lobby detour, so a fast turn flip used to land
+    // before the mover's board updated -> the click was REJECTED as out-of-turn and
+    // the page desynced. Waiting on can_move is a legal, non-deadlocking wait that
+    // keeps the 46-row gate deterministic without touching the server code.
+    const preBoardAtFrom = await page.evaluate(({ x, y }) => (board[y][x] & 0b1111), vFrom);
+    await waitFor(async () => (await page.evaluate(() => can_move === true && !is_being_validated)) === true,
+      `mover(${m.side === 0 ? 'white' : 'black'}) turn to propagate before step ${stepNo}`,
+      15000);
+    // Diagnostic (self-logging): if the MOVER still reports a non-piece at the
+    // from-square after the turn wait, its board was stale/blanked (a draw-loop
+    // race) and its click WILL be rejected -> surfaces as a desync instead of a
+    // hard harness crash, so the row fails visibly. Expected value 0 (never fires).
+    const boardAtFromNow = await page.evaluate(({ x, y }) => (board[y][x] & 0b1111), vFrom);
+    if (boardAtFromNow === 0 && preBoardAtFrom !== 0) {
+      logRow(`H-stale mover(${m.side === 0 ? 'white' : 'black'}) board blank at from-square before step ${stepNo} (draw-race)`, 'FAIL',
+        `from=${vFrom.x},${vFrom.y} piece before-wait=${preBoardAtFrom} after-wait=${boardAtFromNow} (want non-zero)`);
+    }
+
     if (m.o0) {
       // 4. O-O: the king selection must highlight the castling target square
       // (g1, visual == server for white), then click it. Closes the A2
