@@ -10,7 +10,9 @@ const __dirname = path.dirname(__filename);
 
 import { chessMakeMove, checkLegalMove, isGameEndReason, isKingInCheck, turnToColor, king, white, black, pawn, rook, bishop, knight, queen, checkThreefoldDraw, isInsufficientMaterial, isFiftyMoveRule, getPiece, blank } from './lib/chessutils.js';
 import { matches, findMatch, initMatch, findPrivateMatch, removeMatch, clearMatchTimers, genMatchId, setSeatHook } from './lib/matchmaking.js';
-import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, loadSessionsFile, attachSessionsToUsers, START_ELO } from './lib/auth.js';
+import { authenticateUser, signupUser, validateSession, loadUsersFile, saveUsersFile, loadSessionsFile, attachSessionsToUsers, findUserByName, START_ELO } from './lib/auth.js';
+import { appendGameRow, loadGames } from './lib/games.js';
+import { createInvite, getInviteByMatch, listLiveInvitesTo } from './lib/invites.js';
 import { log as dlog } from './lib/debuglog.js';
 
 // Rate limiting: prevent clients from spamming socket events
@@ -148,6 +150,26 @@ function endMatch(match, reason, lostColor) {
   // winner's, so the pair sum is preserved (1500+1500=3000 baseline).
   const u1 = match.player1Socket && match.player1Socket.data && match.player1Socket.data.user;
   const u2 = match.player2Socket && match.player2Socket.data && match.player2Socket.data.user;
+
+  // T31 (contract 32): game history row. Written here (same code path that emits
+  // gameEnd) EXACTLY ONCE per match — match.gameEnded is set at the top and the
+  // match is spliced from the pool by removeMatch, so no other endMatch can run
+  // for it. Skipped when BOTH sides are guests (no registered account exists to
+  // tie the row to). elo before/after are captured from the users.csv FILE:
+  // before = read before the K-factor update, after = re-read after saveUsersFile
+  // (a guest keeps 0 — guests are never in users.csv).
+  const readElos = (names) => {
+    try {
+      const rows = loadUsersFile();
+      const byName = {};
+      for (const u of rows) byName[u.username] = Number(u.elo) || START_ELO;
+      return names.map(n => (n && byName[n.username] !== undefined ? byName[n.username] : 0));
+    } catch (e) {
+      dlog('endMatch: games.csv elo read failed', String(e));
+      return names.map(() => 0);
+    }
+  };
+  const eloBefore = readElos([u1, u2]);
   if (u1 && u2) {
     const score1 = loser === undefined ? 0.5 : (loser === 1 ? 1 : 0);
     const exp1 = 1 / (1 + Math.pow(10, ((u2.elo - u1.elo) / 400)));
@@ -159,6 +181,29 @@ function endMatch(match, reason, lostColor) {
     const eloMsg = { player1: u1.elo, player2: u2.elo };
     if (match.player1Socket) match.player1Socket.emit('elo', eloMsg);
     if (match.player2Socket) match.player2Socket.emit('elo', eloMsg);
+  }
+  const eloAfter = readElos([u1, u2]);
+  if (u1 || u2) {
+    const white = u1 ? u1.username : null;
+    const black = u2 ? u2.username : null;
+    // result from the loser's perspective (0=white, 1=black): loser undefined/draw
+    // -> draw; otherwise the non-losing side wins.
+    let result = 'draw';
+    if (reason !== 'draw' && loser !== undefined) result = loser === 1 ? 'white-win' : 'black-win';
+    appendGameRow({
+      ts: new Date().toISOString(),
+      white: white || '-',
+      black: black || '-',
+      result: result,
+      reason: reason,
+      whiteEloBefore: eloBefore[0],
+      whiteEloAfter: eloAfter[0],
+      blackEloBefore: eloBefore[1],
+      blackEloAfter: eloAfter[1]
+    });
+    dlog('endMatch: games.csv appended matchId=', match.matchId, 'result=', result, 'white=', white || '-', 'black=', black || '-');
+  } else {
+    dlog('endMatch: games.csv skipped (guest-vs-guest) matchId=', match.matchId);
   }
 }
 
@@ -245,6 +290,66 @@ app.get('/game', (req, res) => {
   res.render('game', {
     matchId: matchId ?? ""
   });
+});
+
+// T31 (contract 32, event 5): GET /account — cookie session (same sessionID
+// cookie + regex as the socket handshake logger); no/invalid session -> redirect
+// to / (the client shows the login form there). Renders views/account.ejs (S-B
+// owns the final markup; the route provides the data) with
+//   { username, elo, played, games: [ {date, opponent, result: win|loss|draw
+//     (from MY view), method: 'стандартная', eloBefore, eloAfter} ] }
+// games = games.csv rows where I am white or black, newest first (the CSV is
+// append-ordered, so reverse the file order). Per-view result: I am white ->
+// 'win' on white-win; I am black -> 'win' on black-win; draw -> 'draw'.
+app.get('/account', (req, res) => {
+  const cookie = req.headers['cookie'] || '';
+  const sidMatch = cookie.match(/sessionID=([^;\s]+)/);
+  const user = sidMatch ? validateSession(users, sidMatch[1]) : null;
+  if (!user) {
+    dlog('account: redirect to / (no valid session)');
+    return res.redirect('/');
+  }
+  let games = [];
+  try {
+    const all = loadGames();
+    const mine = [];
+    for (let i = all.length - 1; i >= 0; i--) { // newest first
+      const g = all[i];
+      if (g.white === user.username) {
+        mine.push({
+          date: g.ts, opponent: g.black, result: g.result === 'draw' ? 'draw' : (g.result === 'white-win' ? 'win' : 'loss'),
+          method: 'стандартная', eloBefore: g.whiteEloBefore, eloAfter: g.whiteEloAfter
+        });
+      } else if (g.black === user.username) {
+        mine.push({
+          date: g.ts, opponent: g.white, result: g.result === 'draw' ? 'draw' : (g.result === 'black-win' ? 'win' : 'loss'),
+          method: 'стандартная', eloBefore: g.blackEloBefore, eloAfter: g.blackEloAfter
+        });
+      }
+    }
+    games = mine;
+  } catch (e) {
+    dlog('account: games.csv read failed', String(e));
+  }
+  dlog('account: rendered for', user.username, 'games=', games.length);
+  res.render('account', { username: user.username, elo: Number(user.elo) || START_ELO, games, played: games.length });
+});
+
+// T31 (contract 32 addendum 2026-11-23): GET /api/me — lobby session restore.
+// Parses the sessionID cookie (same regex as the socket handshake logger),
+// validates the session; 200 {username, elo} when valid, 401 {} when absent
+// or bogus. Thin route, no new deps. The client (S-B) fetches it on lobby
+// load to render the logged-in state without a fresh signin.
+app.get('/api/me', (req, res) => {
+  const cookie = req.headers['cookie'] || '';
+  const sidMatch = cookie.match(/sessionID=([^;\s]+)/);
+  const user = sidMatch ? validateSession(users, sidMatch[1]) : null;
+  if (!user) {
+    dlog('api/me: 401 (no valid session cookie)');
+    return res.status(401).json({});
+  }
+  dlog('api/me: 200 username=', user.username);
+  res.json({ username: user.username, elo: Number(user.elo) || START_ELO });
 });
 
 // socket.io server
@@ -487,13 +592,24 @@ io.on('connection', socket => {
       dlog('auth: guest (no sessionID) socket=', socket.id, 'matchId=', matchId);
     }
 
+    // T31 (contract 32, event 3): push this user's LIVE invites right after a
+    // successful authenticated auth — a fresh lobby page shows them without an
+    // extra round-trip. Guests (no socket.data.user) get nothing.
+    if (user) {
+      socket.emit('invites', listLiveInvitesTo(user.username));
+    }
+
     if (matchId === null) {
       // regular match making
       dlog('auth: routing to findMatch socket=', socket.id);
       findMatch(socket);
     } else {
-      dlog('auth: routing to findPrivateMatch socket=', socket.id, 'matchId=', matchId);
-      findPrivateMatch(socket, matchId); // if func returns 0, no private match exists with that matchID (invalid link)
+      // T31 (contract 32, event 4): if the match carries an invite record, pass it
+      // so findPrivateMatch applies the invite-bound join rule (only invite.to /
+      // invite.from may join; plain private matches pass null and stay open).
+      const invite = getInviteByMatch(matchId);
+      dlog('auth: routing to findPrivateMatch socket=', socket.id, 'matchId=', matchId, 'invite=', invite ? invite.to : null);
+      findPrivateMatch(socket, matchId, invite); // if func returns 0, no private match exists with that matchID (invalid link)
     }
     // use sessionID to identify the user
     // if sessionID is undefined, then the user plays as a guest
@@ -597,6 +713,59 @@ io.on('connection', socket => {
 
     dlog('private-match: created matchId=', privateMatch.matchId, 'for socket=', socket.id);
     socket.emit('private-match', privateMatch.matchId);
+  });
+
+  // T31 (contract 32, event 2): invite:create {targetUsername, method}.
+  // AUTHENTICATED socket only (else {reason:'auth'}). Failures are emitted to
+  // the inviter as invite:failed {reason}: 'method-na' (method must be
+  // 'standard' for now), 'no-user' (target not registered), 'self' (invited
+  // self). Success: generate a matchId (genMatchId), create an unseated private
+  // match, store the invite for the target (invites.json + RAM), emit
+  // invite:created {matchId}. The inviter then navigates to /game?matchId=<id>
+  // and joins as white via the normal auth(matchId) flow; the target's join is
+  // restricted by the invite check (event 4).
+  socket.on('invite:create', ({ targetUsername, method } = {}) => {
+    const me = socket.data && socket.data.user;
+    if (!me) {
+      dlog('invite:create: FAILED reason=auth socket=', socket.id);
+      return socket.emit('invite:failed', { reason: 'auth' });
+    }
+    if (method !== 'standard') {
+      dlog('invite:create: FAILED reason=method-na method=', method, 'from=', me.username);
+      return socket.emit('invite:failed', { reason: 'method-na' });
+    }
+    const target = findUserByName(users, targetUsername);
+    if (!target) {
+      dlog('invite:create: FAILED reason=no-user target=', targetUsername, 'from=', me.username);
+      return socket.emit('invite:failed', { reason: 'no-user' });
+    }
+    if (target.username === me.username) {
+      dlog('invite:create: FAILED reason=self from=', me.username);
+      return socket.emit('invite:failed', { reason: 'self' });
+    }
+    const newId = genMatchId();
+    const privateMatch = initMatch(newId, null);
+    privateMatch.private = true;
+    matches.push(privateMatch);
+    const invite = createInvite({ to: target.username, from: me.username, fromElo: Number(me.elo) || START_ELO, method: 'standard', matchId: newId });
+    dlog('invite:create: OK from=', me.username, 'to=', invite.to, 'matchId=', newId);
+    socket.emit('invite:created', { matchId: newId });
+  });
+
+  // T31 (contract 32, event 3): invites:list — authenticated socket asks for its
+  // current invites; the server replies with `invites` = the stored records
+  // addressed to this username that still reference a LIVE match. Dead matches
+  // (server restart, opponent left pre-start) are filtered out of the payload
+  // but the stored record stays (RAM + invites.json) until it references a live
+  // match again — an accept after a server restart lands on the existing
+  // gameNotFound path (graceful). The automatic push after an authenticated
+  // 'auth' uses the same listLiveInvitesTo list.
+  socket.on('invites:list', () => {
+    const me = socket.data && socket.data.user;
+    if (!me) return; // guests have no invites (auth gate)
+    const live = listLiveInvitesTo(me.username);
+    dlog('invites:list: user=', me.username, 'live=', live.length);
+    socket.emit('invites', live);
   });
 
   // Handle promotion piece selection

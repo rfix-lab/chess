@@ -118,10 +118,27 @@ export function findMatch(playerSocket) {
   return matches.length - 1;
 }
 
-export function findPrivateMatch(playerSocket, matchId) {
+// T31 (contract 32, event 4): invite-bound join. `invite` is the invite record
+// stored for this match (src/lib/invites.js) or null for a plain private match.
+// When set, ONLY invite.to (the target — joins as BLACK, or as white if that seat
+// is still free for the target to accept first) and invite.from (the inviter — the
+// first participant / host, joins as white) may join; everyone else gets
+// gameNotFound through the caller's no-match path. Plain private matches
+// (invite === null) keep the current open-join semantics.
+export function findPrivateMatch(playerSocket, matchId, invite) {
   for(let match of matches) {
     if (match.matchId === matchId && match.private) {
       if (match.gameEnded) continue; // finished private matches never re-enterable (S2)
+
+      // Invite-bound: the socket's registered username must be the target or the
+      // inviter (socket.data.user is set by the 'auth' handler BEFORE this call).
+      if (invite) {
+        const me = playerSocket.data && playerSocket.data.user;
+        if (!me || (me.username !== invite.to && me.username !== invite.from)) {
+          log('matchmaking findPrivateMatch: REFUSED (invite-bound, not to/from) matchId=', matchId, 'socketUser=', me ? me.username : 'guest', 'inviteTo=', invite.to, 'inviteFrom=', invite.from);
+          return 0; // caller emits gameNotFound (same path as an unknown id)
+        }
+      }
 
       if (match.player1Socket && match.player1Socket.connected) {
         match.player2Socket = playerSocket;
