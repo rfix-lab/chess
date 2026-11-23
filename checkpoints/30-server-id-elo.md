@@ -47,7 +47,10 @@ FORBIDDEN: src/public/**, test/e2e-client.mjs, test/repro-*.mjs, test/audit-*.mj
         dead id must not be reused (first naive run hit exactly this: U2 got nothing)
       - seat-elo phase 3: registered vs registered → both rated:true, reciprocal opponent elo
       - seat-elo key discipline: seat payloads carry own/rated/opponent only, never player1/player2
-- [ ] 7. Gates: node --check on all touched files after each commit; final `npm test` all-green.
+- [x] 7. Gates: node --check on all touched files after each commit (all green); final `npm test`
+      all-green: **64/64 passed, 0 failed** (51 pre-existing rows + perft + 13 new T30 rows),
+      final run 2026-11-23 ~11:40 MSK. e2e/browser suites NOT run (client agent owns the tree;
+      orchestrator runs the e2e gate after both agents land).
 
 ## Event contract (for the client agent)
 
@@ -76,10 +79,33 @@ Client → server (matchId is an opaque string; server String()s at the boundary
 ## Commit log
 
 - c61141f feat(server): genMatchId() — opaque 8-char a-z0-9 ids from node:crypto
-  (src/lib/matchmaking.js + this checkpoint). Gates: node --check OK.
+  (src/lib/matchmaking.js + checkpoint). node --check OK.
 - b374cdb feat(server): matchId opaque-string everywhere + private-match ignores client arg
   (src/index.js + checkpoint). Includes TASK 2's emitSeatElo/setSeatHook wiring
-  (gate for it = the T30 seat-elo rows in the test commit). Gates: node --check OK;
-  suite run: 61/64 — the 3 failures were the NEW seat-elo phase 2/3 rows (fresh-match
-  issue, fixed in the test commit); all 51 pre-existing rows green.
-- <hash> feat(server): T30 test rows — echo-based ids + format/refusal/stale-id + seat-elo phases
+  (verified by the T30 seat-elo rows). node --check OK.
+- 2be02a1 feat(server): T30 test rows — echo-based ids, format/refusal/stale-id + seat-elo phases
+  (test-chess.mjs + checkpoint).
+- 89bf1fb feat(server): harden T30 + REPLAY seat waits against parallel-load flakes
+  (REPLAY 500→1200ms; T30 post-auth 500→1000ms, post-create 300→700ms).
+- cb723f7 feat(server): fix T30 seat-elo phase 2/3 — create match #2 before U disconnects
+  (disconnected socket's packets are dropped → match #2 was never created).
+- 615079e feat(server): T30 seat-elo — G (not U) disconnects to end match #1, keeping U
+  connected for the phase-3 join; deterministic join order (U2 waits on U's p3 payload).
+
+## Verification notes / could-not-verify
+
+- Verified: npm test 64/64 green (6 runs total; the first 4 runs surfaced and fixed real
+  test-design races, see commit log — the SERVER code itself did not change after b374cdb
+  except the already-committed wiring).
+- Verified: no parseInt of matchId anywhere in src/; the only numeric matchId comparison
+  (maxId >) removed; all joins use === on stringified ids.
+- Verified: forbidden files untouched — diff vs 380ff73 touches only
+  src/index.js, src/lib/matchmaking.js, test-chess.mjs, checkpoints/30-server-id-elo.md
+  (src/lib/auth.js is in scope but needed no change — START_ELO is consumed by index.js).
+- Could NOT verify: e2e/browser suite (client agent works in the same tree; orchestrator runs it
+  after both land). The e2e contract the client relies on — 'private-match' echo = one string
+  id, /game?matchId=<id> accepted by the /game route's new /^[a-z0-9]{1,32}$/ check — is
+  covered by the unit rows but not a real browser page load.
+- Note for client agent: old client JS that does `parseInt(matchId)` or builds
+  `matchId+1` will now misbehave on the OPAQUE id; and the /game route now 400s on
+  uppercase matchId query values (was: only non-integers 400'd). See the Event contract above.
