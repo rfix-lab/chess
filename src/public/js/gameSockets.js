@@ -556,6 +556,19 @@ socket.on('elo', (data) => {
   renderEloBadge();
 });
 
+// Contract 38 (F3): fire the short click (click.mp3, declared in game.js) once.
+// currentTime is reset to 0 first so rapid consecutive plays (a capture that is
+// also a check, or two moves back-to-back) don't queue from the current position.
+function playClick() {
+  try { click_sound.currentTime = 0; click_sound.play(); } catch (e) {}
+}
+// Contract 38 (F3): the double-click check sound — one click now, another
+// ~`gap` ms later. Both entries land well inside the E2E's <300 ms assertion.
+function playCheckClicks(gap = 100) {
+  playClick();
+  setTimeout(playClick, gap);
+}
+
 // return from server on whether a move was validated or not
 socket.on('validated', (boardState, turnState, extra) => {
   // Server rejected the move — show feedback and don't update board
@@ -578,9 +591,9 @@ socket.on('validated', (boardState, turnState, extra) => {
     if (my_color == white) {
       if (((boardState[from_position.y][from_position.x] & 0b1111) == blank)
         && (board[to_position.y][to_position.x] & 0b1111) != blank)
-        capture_sound.play();
+        playClick(); // F3: capture = short click (was capture.mp3)
       else if ((boardState[from_position.y][from_position.x] & 0b1111) == blank)
-        move_sound.play();
+        move_sound.play(); // F3: quiet non-capture move keeps move-self.mp3
     }
     else {
       // black: from_position/to_position are VISUAL coords; boardState is in
@@ -591,9 +604,9 @@ socket.on('validated', (boardState, turnState, extra) => {
       let tf = window.ChessLayout.orientToServer(to_position.x, to_position.y, my_color);
       if (((boardState[sf.y][sf.x] & 0b1111) == blank)
         && (board[tf.y][tf.x] & 0b1111) != blank)
-        capture_sound.play();
+        playClick(); // F3: capture = short click (was capture.mp3)
       else if ((boardState[sf.y][sf.x] & 0b1111) == blank)
-        move_sound.play();
+        move_sound.play(); // F3: quiet non-capture move keeps move-self.mp3
     }
   }
   if (my_color == 0)
@@ -601,6 +614,28 @@ socket.on('validated', (boardState, turnState, extra) => {
   else
     // Black sees rotated board (180°) — single orientation seam: layout.js
     board = window.ChessLayout.rotateBoard(boardState, my_color);
+  // Contract 38 (F3): check sound. If the move just applied leaves the side TO
+  // MOVE (turnState) in check, fire the double click. Detected locally off the
+  // board now in hand — server orientation for white, 180-rotated for black —
+  // by finding the king of the side to move and asking window.isFigureUnderAttack
+  // (it scans the SAME global board, and isKingInCheck strips indicator bits,
+  // so the server's check highlight on the king doesn't break the scan). Fires
+  // once per APPLIED move only — startGame/reconnected restore state without
+  // reaching this path, so a reconnect does not re-play an old check click. A
+  // move that is both capture and check plays 3 clicks (capture + 2) — fine.
+  // `!extra.pendingPromotion`: a promotion applies in TWO 'validated' events;
+  // the first still shows the pawn on the promotion rank with the OLD turn, so
+  // the check test is only meaningful on the FINAL board (promotion:choose).
+  if (!extra || !extra.pendingPromotion) {
+    const wantColor = turnToColor(turnState);
+    let ckx = -1, cky = -1;
+    for (let yy = 0; yy < 8 && cky < 0; yy++) {
+      for (let xx = 0; xx < 8; xx++) {
+        if ((board[yy][xx] & 0b1111) === king && (board[yy][xx] & 0b1000) === wantColor) { ckx = xx; cky = yy; break; }
+      }
+    }
+    if (ckx >= 0 && window.isFigureUnderAttack(ckx, cky, turnState)) playCheckClicks(100);
+  }
   is_being_validated = false;
   // Contract 38 (F2): reached only for an accepted move (rejected candidates
   // return early). turnState is the NEXT side to move, so the move just
@@ -764,20 +799,27 @@ socket.on('takebackAccepted', (boardState, turnState) => {
   updateTakebackButton();
 });
 
-// Takeback declined by opponent: the server sends the Russian message as a
-// takebackError, so no extra toast here — the latch simply stays clear, and
-// the button re-arms whenever I am again the side that just moved.
+// Takeback declined: the requester (the side that just moved) gets a BARE
+// takebackDeclined from the server — it keeps the Russian message strings in the
+// takebackError channel, so historically nothing visible happened on a decline
+// and the requester just sat in silence while the button recomputed (the
+// decline latch is cleared by the requester's next move, so it re-arms later).
+// Contract 38 F3 addendum: surface 'Соперник отказался возвращать ход' in the
+// #status line for ~3 s, reusing the shared F2 status-message helper
+// (flashStatusMsg, commit e7313ee) instead of duplicating the accent/restore
+// logic. updateTakebackButton keeps the no-permanent-lock rule.
 socket.on('takebackDeclined', () => {
+  flashStatusMsg('Соперник отказался возвращать ход');
   updateTakebackButton();
 });
 
-// Takeback error (server-side Russian message, e.g. «Возврат хода уже
-// отклонён», «Сейчас ваш ход - отменять нечего»): shown in the status line
-// for ~3 s with an accent color, no canvas shake. The status text then
-// restores to the turn text; the button itself is recomputed by the turn
-// rule (my turn again after my next move → armed again).
-socket.on('takebackError', (msg) => {
-  if (typeof msg !== 'string' || !msg) return;
+// Shared status-message helper (F2, commit e7313ee): shows a transient
+// accent-colored message in the #status line for ~3 s, then restores the turn
+// text — unless a move already rewrote the status in the meantime (the restore
+// only fires if the line still reads the message AND the game is not over).
+// Reused by takebackError (server Russian strings) AND takebackDeclined
+// (addendum) so the timer/restore logic lives in one place.
+function flashStatusMsg(msg) {
   const status = document.getElementById('status');
   if (!status) { showToast(msg); return; }
   if (window.__statusRestorePending) clearTimeout(window.__statusRestorePending);
@@ -793,6 +835,14 @@ socket.on('takebackError', (msg) => {
       status.innerText = turnText;
     }
   }, 3000);
+}
+
+// Takeback error (server-side Russian message, e.g. «Возврат хода уже
+// отклонён», «Сейчас ваш ход - отменять нечего»): shown in the status line
+// for ~3 s with an accent color, no canvas shake (shared helper above).
+socket.on('takebackError', (msg) => {
+  if (typeof msg !== 'string' || !msg) return;
+  flashStatusMsg(msg);
   updateTakebackButton();
 });
 

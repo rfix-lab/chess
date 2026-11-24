@@ -1,6 +1,12 @@
 const move_sound = new Audio('/audio/move-self.mp3');
 const capture_sound = new Audio('/audio/capture.mp3');
 const wrong_move_sound = new Audio('/audio/wrong_move_sound.mp3');
+// Contract 38 (F3): the short click (click.mp3) — capture plays it once, and
+// a check plays it TWICE (a quick double click, ~100 ms apart). 0.9 volume keeps
+// it present but not harsh. capture_sound/capture.mp3 stay declared (other refs)
+// but the capture path now uses this click.
+const click_sound = new Audio('/audio/click.mp3');
+click_sound.volume = 0.9;
 wrong_move_sound.volume = 0.35; // soft quiet 'duff' — contract 37 stage B
 
 const canvas = document.getElementById("cnv");
@@ -55,6 +61,21 @@ const pieceSortOrder = {
 function sortCaptured(arr) {
   return arr.slice().sort((a, b) => (pieceSortOrder[a] || 9) - (pieceSortOrder[b] || 9));
 }
+
+// Contract 38 (F3): the client-side attack detector, exposed globally for the
+// check-sound logic and the E2E harness (row 37B calls window.isFigureUnderAttack
+// with a square + the side to move). True iff the KING of `turn` sits on (x,y) and
+// is attacked by an enemy piece. (x,y) and `turn` are in SERVER orientation — the
+// caller must pass a server-orientation board; `isKingInCheck` (chessutils.js,
+// already global) does the king lookup + enemy-move scan and strips display-only
+// indicator bits internally. Piece identity is the low 4 bits, so an indicator
+// bit on the square does not change the king test.
+window.isFigureUnderAttack = function (x, y, turn) {
+  if (typeof board === 'undefined') return false;
+  const v = board[y] && board[y][x];
+  if (v == null || ((v & 0b1111) & 0b1111) !== king) return false;
+  return isKingInCheck(board, turn);
+};
 
 function recalcLayout() {
   const vw = window.innerWidth;

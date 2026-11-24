@@ -1,0 +1,100 @@
+{
+  "env": {
+    "port": 39711,
+    "chromium": "/snap/bin/chromium",
+    "serverLog": "/tmp/f3-audio-server.log",
+    "time": "2026-11-24T10:02:30.225Z"
+  },
+  "matches": {
+    "A": "9fdyac5t",
+    "B": "lcmurspz"
+  },
+  "rows": [
+    {
+      "test": "(a) white 1.e4 (quiet) -> move-self.mp3 played, NO click.mp3",
+      "status": "PASS",
+      "detail": "white __played delta=[move-self.mp3] move-self=1 (want 1) click=0 (want 0) wrong=0 (want 0); boardsSync=true; W=\"Opponent's turn\""
+    },
+    {
+      "test": "(d) takeback declined -> white #status shows «Соперник отказался возвращать ход» (~3 s, F2 helper)",
+      "status": "PASS",
+      "detail": "white status=\"Соперник отказался возвращать ход\" statusClass=\"status-takeback-error\" cnvShake=false; black status=\"Your turn\""
+    },
+    {
+      "test": "(b) white 2.exd5 (capture, no check) -> click.mp3 count +1, no move-self, no double-click",
+      "status": "PASS",
+      "detail": "white __played delta=[click.mp3] click=1 (want 1) move-self=0 (want 0); boardsSync=true; W=\"Opponent's turn\""
+    },
+    {
+      "test": "(c) black 2...Qh4+ (check on white king, no capture) -> EXACTLY 2 click.mp3 within <300 ms",
+      "status": "PASS",
+      "detail": "black __played delta=[move-self.mp3@3394,click.mp3@3396,click.mp3@3550] click=2 (want 2) clickSpanMs=155 (want <300) move-self=1 (want 1 — black's own quiet move); boardsSync=true; W=\"Check Mate you lost! 😢\" B=\"Check Mate you Won! 🎉\""
+    },
+    {
+      "test": "No JS console/page errors on any page",
+      "status": "PASS",
+      "detail": "none"
+    }
+  ],
+  "playedTranscripts": {
+    "matchA_white": {
+      "after_1e4_quiet": [
+        {
+          "src": "http://127.0.0.1:39711/audio/move-self.mp3",
+          "t": 5689
+        }
+      ],
+      "after_2exd5_capture": [
+        {
+          "src": "http://127.0.0.1:39711/audio/click.mp3",
+          "t": 7000.5
+        }
+      ],
+      "full": [
+        {
+          "src": "http://127.0.0.1:39711/audio/move-self.mp3",
+          "t": 5689
+        },
+        {
+          "src": "http://127.0.0.1:39711/audio/click.mp3",
+          "t": 7000.5
+        }
+      ]
+    },
+    "matchB_white": {
+      "after_2Nf6_check": [
+        {
+          "src": "http://127.0.0.1:39711/audio/move-self.mp3",
+          "t": 3393.9000000953674
+        },
+        {
+          "src": "http://127.0.0.1:39711/audio/click.mp3",
+          "t": 3395.600000143051
+        },
+        {
+          "src": "http://127.0.0.1:39711/audio/click.mp3",
+          "t": 3550.2000000476837
+        }
+      ],
+      "full": [
+        {
+          "src": "http://127.0.0.1:39711/audio/move-self.mp3",
+          "t": 2364
+        },
+        {
+          "src": "http://127.0.0.1:39711/audio/move-self.mp3",
+          "t": 3393.9000000953674
+        },
+        {
+          "src": "http://127.0.0.1:39711/audio/click.mp3",
+          "t": 3395.600000143051
+        },
+        {
+          "src": "http://127.0.0.1:39711/audio/click.mp3",
+          "t": 3550.2000000476837
+        }
+      ],
+      "black_clicks_on_check": null
+    }
+  }
+}
