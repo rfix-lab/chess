@@ -50,6 +50,13 @@
 // Board state on the pages is read via window.__chessDebug (a tiny test-only
 // hook in game.js); boards are normalised with the page's own
 // ChessLayout.rotateBoard before comparison.
+//
+// Contract 38 rows (38A/38B/38C): takeback accept/decline UI (38A, 38B — one
+// fresh guest match for both) and capture/check click sfx (38C1..38C3 — the
+// sound pages install an evaluateOnNewDocument HTMLAudioElement.prototype.play
+// stub pushing {src, t} into window.__played, so the rows count played
+// click.mp3 entries). Every test gets a FRESH private match via the same
+// raw-socket seating, so the rows are independent of the main game.
 
 import { createRequire } from 'module';
 import path from 'path';
@@ -169,6 +176,13 @@ const ghost = { __ctx: null, __consoleErrors: [] };
 // is to make the /users stats sort (elo desc) observable and the profile
 // opponent cells unambiguous (each user has a distinct name).
 const u3 = { __ctx: null, __consoleErrors: [] };
+// Contract 38: isolated page pairs for the contract-38 rows (each row group
+// seats into its OWN fresh private match, independent of the main game).
+const tbA = { __ctx: null, __consoleErrors: [] };
+const tbB = { __ctx: null, __consoleErrors: [] };
+const snd1 = { __ctx: null, __consoleErrors: [] };
+const snd2 = { __ctx: null, __consoleErrors: [] };
+const snd3 = { __ctx: null, __consoleErrors: [] };
 
 try {
   // ---------- server (async spawn, never spawnSync) ----------
@@ -1277,6 +1291,362 @@ try {
     logRow('X12 /user?name=<unknown> -> 404 with the Russian «Пользователь не найден»', x12Ok ? 'PASS' : 'FAIL', x12Detail);
   }
 
+  // ---------- Contract 38: takeback accept/decline UI + capture/check click sfx ----------
+  // Each test seats a FRESH private match (same raw-socket pattern as S0) so the
+  // rows are independent of the main scholar's-mate game and of each other.
+  {   // ---- contract-38 helpers (fresh-match seating + board/turn assertions) ----
+    const seatContract38 = async (wSlot, bSlot) => {
+      const raw = io(BASE, { transports: ['websocket'] });
+      await new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error('c38 raw socket: no connect')), 10000);
+        raw.on('connect', () => { clearTimeout(to); res(null); });
+        raw.on('connect_error', e => { clearTimeout(to); rej(e); });
+      });
+      const mid = await new Promise((resolve, reject) => {
+        const to = setTimeout(() => reject(new Error('c38 raw socket: no private-match echo')), 10000);
+        raw.on('private-match', id => { clearTimeout(to); resolve(id); });
+        raw.emit('private-match', 1);
+      });
+      raw.close();
+      await sleep(150);
+      const wp = await mkPage(wSlot, wSlot === tbA ? 'c38A-white' : 'c38-white');
+      await wp.goto(BASE + `/game?matchId=${mid}`, { waitUntil: 'networkidle2' });
+      await sleep(700);
+      const bp = await mkPage(bSlot, bSlot === tbB ? 'c38B-black' : 'c38-black');
+      await bp.goto(BASE + `/game?matchId=${mid}`, { waitUntil: 'networkidle2' });
+      await waitFor(async () => (await wp.evaluate(() => document.getElementById('status').innerText)) === 'Playing as white', 'c38 white seated');
+      await waitFor(async () => (await bp.evaluate(() => document.getElementById('status').innerText)) === 'Playing as black', 'c38 black seated');
+      await sleep(250);
+      return { wp, bp, mid };
+    };
+    // Server-orientation board snapshot of a page (strip indicators, rotate via
+    // the page's own ChessLayout) — same seam as the main harness: prefers the
+    // last 'validated' snapshot (__lastValidatedRaw), which is immune to the
+    // game-end replay resetting the live board to the start position.
+    const c38Board = (page) => page.evaluate(`
+      (function () {
+        const src = window.__lastValidatedRaw ||
+          window.__chessDebug.getBoard().map(r => r.slice().map(v => v & 0b1111)).slice();
+        if (window.__lastValidatedRaw) return src.map(r => r.map(v => v & 0b1111));
+        return window.ChessLayout.rotateBoard(src, window.__chessDebug.myColor);
+      })()`);
+    // Visual pixel coords for `page` (same model as squarePx; the black page
+    // rotates the passed SERVER coords, the white page uses them as-is).
+    const c38Px = (page, x, y) => page.evaluate(({ x, y }) => {
+      const r = document.getElementById('cnv').getBoundingClientRect();
+      const c = side_len / 8;
+      const my = window.__chessDebug.myColor;
+      const p = my === 1 ? { x: 7 - x, y: 7 - y } : { x, y };
+      return { x: r.left + offset_x + (p.x + 0.5) * c, y: r.top + offset_y + (p.y + 0.5) * c };
+    }, { x, y });
+    const c38Drive = async (page, from, to, kind) => {
+      if (kind === 'drag') {
+        const s = await c38Px(page, from.x, from.y);
+        const e = await c38Px(page, to.x, to.y);
+        await page.mouse.move(s.x, s.y);
+        await page.mouse.down();
+        await sleep(40);
+        await page.mouse.move(s.x + 20, s.y + 20, { steps: 4 });
+        await sleep(40);
+        await page.mouse.move(e.x, e.y, { steps: 6 });
+        await sleep(40);
+        await page.mouse.up();
+      } else {
+        const a = await c38Px(page, from.x, from.y);
+        const b = await c38Px(page, to.x, to.y);
+        await page.mouse.click(a.x, a.y);
+        await sleep(70);
+        await page.mouse.click(b.x, b.y);
+      }
+    };
+    const c38Settled = (wp, bp) => Promise.all([
+      waitFor(async () => (await wp.evaluate(() => !is_being_validated)) === true, 'c38 white validated'),
+      waitFor(async () => (await bp.evaluate(() => !is_being_validated)) === true, 'c38 black validated'),
+    ]).then(() => sleep(80));
+    const c38Btn = (page) => page.evaluate(() => document.getElementById('btn-takeback').disabled);
+    const c38Status = (page) => page.evaluate(() => document.getElementById('status').innerText);
+    const c38Modal = (page) => page.evaluate(() => {
+      const m = document.getElementById('takebackOfferModal');
+      if (!m) return null;
+      const h3 = m.querySelector('h3');
+      const acc = document.getElementById('btn-takeback-accept');
+      const dec = document.getElementById('btn-takeback-decline');
+      return { visible: m.style.display === 'flex', title: h3 ? h3.innerText : null,
+               accept: acc ? acc.innerText : null, decline: dec ? dec.innerText : null };
+    });
+    // Board expectations (server orientation, stripped):
+    const C38_START = expected[0];
+    const C38_AFTER_E4 = expected[1];
+    const C38_AFTER_D5 = [[12,14,13,11,10,13,14,12],[9,9,9,0,9,9,9,9],[0,0,0,0,0,0,0,0],[0,0,0,9,0,0,0,0],[0,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0],[1,1,1,1,0,1,1,1],[4,6,5,3,2,5,6,4]];
+    const C38_AFTER_EXD5 = [[12,14,13,11,10,13,14,12],[9,9,9,0,9,9,9,9],[0,0,0,0,0,0,0,0],[0,0,0,1,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,1,1,1,0,1,1,1],[4,6,5,3,2,5,6,4]];
+    const C38_AFTER_1F3 = [[12,14,13,11,10,13,14,12],[9,9,9,9,9,9,9,9],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,1,1,1,1,0,1,1],[4,6,5,3,2,5,6,4]];
+    const C38_AFTER_E6 = [[12,14,13,11,10,13,14,12],[9,9,9,9,0,9,9,9],[0,0,0,0,9,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[1,1,1,1,1,0,1,1],[4,6,5,3,2,5,6,4]];
+    const C38_AFTER_G4 = [[12,14,13,11,10,13,14,12],[9,9,9,9,0,9,9,9],[0,0,0,0,9,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,1,0],[1,1,1,1,1,0,0,1],[4,6,5,3,2,5,6,4]];
+    const C38_AFTER_QH4 = [[12,14,13,0,10,13,14,12],[9,9,9,9,0,9,9,9],[0,0,0,0,9,0,0,0],[0,0,0,0,0,0,0,0],[0,0,0,0,0,0,1,11],[0,0,0,0,0,1,0,0],[1,1,1,1,1,0,0,1],[4,6,5,3,2,5,6,4]];
+    const c38BoardEqual = (pages, want) => Promise.all(pages.map(p => c38Board(p)))
+      .then(bs => bs.every(b => JSON.stringify(b) === JSON.stringify(want)));
+
+    // ================= 38A: takeback accept (UI) =================
+    // Seat a fresh match; before any move white's #btn-takeback is DISABLED
+    // (no history); white plays 1.e4 via the canvas-drag helper; the button
+    // becomes ENABLED (requester = the side that just moved); white clicks it;
+    // the black page shows #takebackOfferModal with the Russian title; black
+    // clicks Принять; BOTH pages restore the pre-move board and the status
+    // says white to move.
+    {
+      const { wp, bp, mid } = await seatContract38(tbA, tbA);
+      let step0 = false, step0d = '';
+      try {
+        const dis0 = await c38Btn(wp);
+        step0 = dis0 === true;
+        step0d = `white #btn-takeback disabled=${dis0} before any move (no history)`;
+      } catch (e) { step0d = '38A step0 error: ' + (e && e.message || e); }
+      logRow('38A takeback: before any move the white #btn-takeback is disabled (no move history)', step0 ? 'PASS' : 'FAIL', step0d);
+
+      let step1 = false, step1d = '';
+      try {
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38A white turn', 15000);
+        await c38Drive(wp, toXY('e2'), toXY('e4'), 'drag');
+        await c38Settled(wp, bp);
+        const applied = serverLog().split('\n').filter(l => l.includes('move: APPLIED') && l.includes('matchId= ' + mid)).length;
+        const en = await c38Btn(wp);
+        const boardsOk = await c38BoardEqual([wp, bp], C38_AFTER_E4);
+        step1 = applied === 1 && en === false && boardsOk;
+        step1d = `white 1.e4 (canvas drag): appliedLines=${applied} (want 1); #btn-takeback enabled after own move: ${en === false}; both boards == post-1.e4: ${boardsOk}`;
+      } catch (e) { step1d = '38A step1 error: ' + (e && e.message || e); }
+      logRow('38A takeback: after white 1.e4 (drag) the #btn-takeback is enabled (requester = the side that just moved)', step1 ? 'PASS' : 'FAIL', step1d);
+
+      let step2 = false, step2d = '';
+      try {
+        await wp.evaluate(() => document.getElementById('btn-takeback').click());
+        const mi = await waitFor(async () => {
+          const m = await c38Modal(bp);
+          return (m && m.visible) ? m : null;
+        }, '38A black offer modal', 15000);
+        step2 = mi.title === 'Соперник предлагает вернуть ход' && mi.accept === 'Принять' && mi.decline === 'Отклонить';
+        step2d = `black #takebackOfferModal title="${mi.title}" accept="${mi.accept}" decline="${mi.decline}" visible=${mi.visible}`;
+      } catch (e) { step2d = '38A step2 error: ' + (e && e.message || e); }
+      logRow('38A takeback: white requests -> black page shows #takebackOfferModal «Соперник предлагает вернуть ход» with Принять/Отклонить', step2 ? 'PASS' : 'FAIL', step2d);
+
+      let step3 = false, step3d = '';
+      try {
+        await bp.evaluate(() => document.getElementById('btn-takeback-accept').click());
+        await waitFor(async () => (await c38BoardEqual([wp], C38_START)) === true, '38A board restored on white', 15000);
+        const wB = await c38Board(wp), bB = await c38Board(bp);
+        const boardsOk = JSON.stringify(wB) === JSON.stringify(C38_START) && JSON.stringify(bB) === JSON.stringify(C38_START);
+        const ws = await c38Status(wp);
+        const bs2 = await c38Status(bp);
+        const wDis = await c38Btn(wp), bDis = await c38Btn(bp);
+        const modalGone = (await c38Modal(bp)).visible === false;
+        const turnWhite = /^Your turn/i.test(ws) && /Opponent/i.test(bs2);
+        step3 = boardsOk && turnWhite && modalGone && wDis === true && bDis === false;
+        step3d = `after Принять: both boards == pre-move position: ${boardsOk}; W status="${ws}" (white to move) B status="${bs2}"; modal closed=${modalGone}; W btn disabled=${wDis} (own turn) B btn enabled=${bDis === false} (last move was white's)`;
+      } catch (e) { step3d = '38A step3 error: ' + (e && e.message || e); }
+      logRow('38A takeback: black clicks Принять -> BOTH pages restore the pre-move board and the status shows white to move', step3 ? 'PASS' : 'FAIL', step3d);
+      const errsA = [...tbA.__consoleErrors].filter(e => !/favicon|net::ERR|Failed to load resource|\/api\/me/i.test(e));
+      logRow('38A no JS console/page errors on the takeback match pages', errsA.length === 0 ? 'PASS' : 'FAIL', errsA.length ? errsA.slice(0, 3).join(' | ') : 'none');
+    }
+
+    // ================= 38B: takeback decline =================
+    // Fresh match: white 1.e4, white requests, black clicks Отклонить -> white
+    // #status shows «Соперник отказался возвращать ход», then restores to the
+    // turn text; the decline must NOT permanently disable #btn-takeback.
+    {
+      const { wp, bp, mid } = await seatContract38(tbB, tbB);
+      let step1 = false, step1d = '';
+      try {
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38B white turn', 15000);
+        await c38Drive(wp, toXY('e2'), toXY('e4'), 'drag');
+        await c38Settled(wp, bp);
+        const en = await c38Btn(wp);
+        await wp.evaluate(() => document.getElementById('btn-takeback').click());
+        await waitFor(async () => { const m = await c38Modal(bp); return m && m.visible ? true : null; }, '38B offer modal on black', 15000);
+        step1 = en === false;
+        step1d = `white 1.e4 + takeback request: #btn-takeback enabled after own move=${en === false}; offer modal shown on black page`;
+      } catch (e) { step1d = '38B step1 error: ' + (e && e.message || e); }
+      logRow('38B takeback: fresh match, white 1.e4, white requests — the offer modal reaches the black page', step1 ? 'PASS' : 'FAIL', step1d);
+
+      let step2 = false, step2d = '';
+      try {
+        await bp.evaluate(() => document.getElementById('btn-takeback-decline').click());
+        const seen = await waitFor(async () => {
+          const t = await c38Status(wp);
+          return t === 'Соперник отказался возвращать ход' ? t : null;
+        }, '38B white status decline message', 15000);
+        const cls = await wp.evaluate(() => document.getElementById('status').className);
+        const shake = await wp.evaluate(() => document.getElementById('cnv').classList.contains('shake'));
+        step2 = seen === 'Соперник отказался возвращать ход' && !shake;
+        step2d = `white #status shows "${seen}" (want «Соперник отказался возвращать ход»); class="${cls}"; canvas shake=${shake}`;
+      } catch (e) { step2d = '38B step2 error: ' + (e && e.message || e); }
+      logRow('38B takeback: black clicks Отклонить -> white #status shows «Соперник отказался возвращать ход» (no canvas shake)', step2 ? 'PASS' : 'FAIL', step2d);
+
+      let step3 = false, step3d = '';
+      try {
+        const restored = await waitFor(async () => {
+          const t = await c38Status(wp);
+          return t === "Opponent's turn" ? t : null;
+        }, '38B white status restores to the turn text', 15000);
+        const wDis = await c38Btn(wp);
+        const boardsOk = await c38BoardEqual([wp, bp], C38_AFTER_E4);
+        step3 = restored === "Opponent's turn" && wDis === false && boardsOk;
+        step3d = `white #status restored to "${restored}"; #btn-takeback NOT disabled after the decline: disabled=${wDis} (want false — no permanent lock); boards still == post-1.e4 (the move stands): ${boardsOk}`;
+      } catch (e) { step3d = '38B step3 error: ' + (e && e.message || e); }
+      logRow('38B takeback: the status restores to the turn text and #btn-takeback stays enabled (no permanent lock after a decline)', step3 ? 'PASS' : 'FAIL', step3d);
+      const errsB = [...tbB.__consoleErrors].filter(e => !/favicon|net::ERR|Failed to load resource|\/api\/me/i.test(e));
+      logRow('38B no JS console/page errors on the decline match pages', errsB.length === 0 ? 'PASS' : 'FAIL', errsB.length ? errsB.slice(0, 3).join(' | ') : 'none');
+    }
+
+    // ================= 38C: capture/check click sfx (audio stub) =================
+    // The sound pages install an evaluateOnNewDocument stub that patches
+    // HTMLAudioElement.prototype.play to push {src, t} into window.__played
+    // before any page script runs (pattern from the F3 verification harness).
+    const seatSound = async (slot) => {
+      const raw = io(BASE, { transports: ['websocket'] });
+      await new Promise((res, rej) => {
+        const to = setTimeout(() => rej(new Error('c38 sound socket: no connect')), 10000);
+        raw.on('connect', () => { clearTimeout(to); res(null); });
+        raw.on('connect_error', e => { clearTimeout(to); rej(e); });
+      });
+      const mid = await new Promise((resolve, reject) => {
+        const to = setTimeout(() => reject(new Error('c38 sound socket: no private-match echo')), 10000);
+        raw.on('private-match', id => { clearTimeout(to); resolve(id); });
+        raw.emit('private-match', 1);
+      });
+      raw.close();
+      await sleep(150);
+      const wp = await mkPage(slot, 'c38snd-white');
+      await wp.evaluateOnNewDocument(() => {
+        window.__played = [];
+        try {
+          const proto = HTMLAudioElement.prototype;
+          const orig = proto.play;
+          proto.play = function () {
+            try { window.__played.push({ src: this.src, t: performance.now() }); } catch (e) {}
+            return Promise.resolve();
+          };
+        } catch (e) {}
+      });
+      await wp.goto(BASE + `/game?matchId=${mid}`, { waitUntil: 'networkidle2' });
+      await sleep(700);
+      const bp = await mkPage(slot, 'c38snd-black');
+      await bp.evaluateOnNewDocument(() => {
+        window.__played = [];
+        try {
+          const proto = HTMLAudioElement.prototype;
+          const orig = proto.play;
+          proto.play = function () {
+            try { window.__played.push({ src: this.src, t: performance.now() }); } catch (e) {}
+            return Promise.resolve();
+          };
+        } catch (e) {}
+      });
+      await bp.goto(BASE + `/game?matchId=${mid}`, { waitUntil: 'networkidle2' });
+      await waitFor(async () => (await wp.evaluate(() => document.getElementById('status').innerText)) === 'Playing as white', 'c38snd white seated');
+      await waitFor(async () => (await bp.evaluate(() => document.getElementById('status').innerText)) === 'Playing as black', 'c38snd black seated');
+      await sleep(250);
+      return { wp, bp, mid };
+    };
+    const playedOf = (page) => page.evaluate(() => (window.__played || []).slice());
+    const clicksOf = (entries) => entries.filter(e => String(e.src).split('/').pop() === 'click.mp3');
+
+    // 38C1: a QUIET move (1.e4) -> click.mp3 count unchanged (move-self plays instead).
+    {
+      const { wp, bp, mid } = await seatSound(snd1);
+      let ok = false, detail = '';
+      try {
+        const base = (await playedOf(wp)).length;
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C1 white turn', 15000);
+        await c38Drive(wp, toXY('e2'), toXY('e4'), 'click');
+        await c38Settled(wp, bp);
+        await sleep(350); // let any (absent) check double-click window close
+        const delta = (await playedOf(wp)).slice(base);
+        const clicks = clicksOf(delta).length;
+        const applied = serverLog().split('\n').filter(l => l.includes('move: APPLIED') && l.includes('matchId= ' + mid)).length;
+        const boardsOk = await c38BoardEqual([wp, bp], C38_AFTER_E4);
+        const moveSelf = delta.filter(e => String(e.src).split('/').pop() === 'move-self.mp3').length;
+        ok = clicks === 0 && applied === 1 && boardsOk && moveSelf === 1;
+        detail = `white 1.e4 (quiet, click-to-move): __played delta=[${delta.map(e => String(e.src).split('/').pop()).join(',') || 'none'}] click.mp3=${clicks} (want 0) move-self=${moveSelf} (want 1); appliedLines=${applied}; boards synced=${boardsOk}`;
+      } catch (e) { detail = '38C1 error: ' + (e && e.message || e); }
+      logRow('38C sound: quiet move (1.e4) -> click.mp3 count unchanged (move-self plays, no click)', ok ? 'PASS' : 'FAIL', detail);
+    }
+
+    // 38C2: a CAPTURE (2.exd5, not check) -> click.mp3 count +1.
+    {
+      const { wp, bp, mid } = await seatSound(snd2);
+      let ok = false, detail = '';
+      try {
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C2 white turn', 15000);
+        await c38Drive(wp, toXY('e2'), toXY('e4'), 'click');
+        await c38Settled(wp, bp);
+        await waitFor(async () => (await bp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C2 black turn', 15000);
+        await c38Drive(bp, toXY('d7'), toXY('d5'), 'click');
+        await c38Settled(wp, bp);
+        const boardsD5 = await c38BoardEqual([wp, bp], C38_AFTER_D5);
+        const base = (await playedOf(wp)).length;
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C2 white turn after 1...d5', 15000);
+        await c38Drive(wp, toXY('e4'), toXY('d5'), 'click');
+        await c38Settled(wp, bp);
+        await sleep(350);
+        const delta = (await playedOf(wp)).slice(base);
+        const clicks = clicksOf(delta).length;
+        const boardsOk = await c38BoardEqual([wp, bp], C38_AFTER_EXD5);
+        ok = clicks === 1 && boardsOk && boardsD5;
+        detail = `white 2.exd5 (capture, no check): __played delta=[${delta.map(e => String(e.src).split('/').pop()).join(',') || 'none'}] click.mp3=${clicks} (want 1); boards after 1...d5 synced=${boardsD5}, after 2.exd5 synced=${boardsOk}`;
+      } catch (e) { detail = '38C2 error: ' + (e && e.message || e); }
+      logRow('38C sound: capture (2.exd5, no check) -> click.mp3 count +1', ok ? 'PASS' : 'FAIL', detail);
+    }
+
+    // 38C3: a CHECK — the Fool's-mate line 1.f3 1...e6 2.g4 2...Qh4+ (non-capture
+    // check on white's king; the F3-verified check line) -> +2 click.mp3 within
+    // 300 ms on the move that delivers the check.
+    // The full harness keeps many game pages open (main game, contract-36 match,
+    // 38A/38B, 38C1/38C2); their 10 ms render loops can delay the +100 ms
+    // second-click setTimeout on the mover page to well past 300 ms. The F3
+    // verification harness (committed evidence: gap 126-189 ms) ran the check
+    // line with ONLY that match's two pages open, so mirror it: close every
+    // other page context before seating the check-line match (all those
+    // matches are already finished; the error arrays the C-err rows read were
+    // populated before this point). The snd3 pair stays open.
+    {
+      for (const s of [white, black, restore, invitee, u1, u2, u3, ghost, tbA, tbB, snd1, snd2]) {
+        try { if (s.__ctx) { await s.__ctx.close(); s.__ctx = null; } } catch (e) {}
+      }
+      let ok = false, detail = '';
+      const { wp, bp, mid } = await seatSound(snd3);
+      try {
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C3 white turn', 15000);
+        await c38Drive(wp, toXY('f2'), toXY('f3'), 'click');
+        await c38Settled(wp, bp);
+        await waitFor(async () => (await bp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C3 black turn', 15000);
+        await c38Drive(bp, toXY('e7'), toXY('e6'), 'click');
+        await c38Settled(wp, bp);
+        await waitFor(async () => (await wp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C3 white turn after 1...e6', 15000);
+        await c38Drive(wp, toXY('g2'), toXY('g4'), 'click');
+        await c38Settled(wp, bp);
+        const baseW = (await playedOf(wp)).length;
+        const baseB = (await playedOf(bp)).length;
+        await waitFor(async () => (await bp.evaluate(() => can_move === true && !is_being_validated)) === true, '38C3 black turn after 2.g4', 15000);
+        await c38Drive(bp, toXY('d8'), toXY('h4'), 'click');
+        await c38Settled(wp, bp);
+        await sleep(450); // the second click lands at +100 ms; wait well past it
+        const deltaW = (await playedOf(wp)).slice(baseW);
+        const deltaB = (await playedOf(bp)).slice(baseB);
+        const clicksW = clicksOf(deltaW);
+        const clicksB = clicksOf(deltaB);
+        // The <300 ms gap is measured on the MOVER page (the F3-verified seam —
+        // the 'validated' handler + setTimeout(100) runs in the page that owns
+        // the turn); the remote page's second-click timer is best-effort under
+        // headless load, so only the count is asserted there.
+        const gapB = clicksB.length === 2 ? Math.round(clicksB[1].t - clicksB[0].t) : null;
+        const boardsOk = await c38BoardEqual([wp, bp], C38_AFTER_QH4);
+        const ws = await c38Status(wp);
+        ok = clicksB.length === 2 && gapB !== null && gapB > 0 && gapB < 300 && clicksW.length === 2 && boardsOk;
+        detail = `black 2...Qh4+ (Fool-mate check on the white king, no capture): mover(black) __played delta=[${deltaB.map(e => String(e.src).split('/').pop()).join(',')}] click.mp3=${clicksB.length} (want 2) gap=${gapB}ms (want <300); white clicks=${clicksW.length} (want 2); boards synced=${boardsOk}; W status="${ws}"`;
+      } catch (e) { detail = '38C3 error: ' + (e && e.message || e); }
+      logRow('38C sound: check (2...Qh4+, the Fool-mate line) -> +2 click.mp3 within 300 ms (double click)', ok ? 'PASS' : 'FAIL', detail);
+    }
+  }
+
   // ---------- console errors ----------
   const wErr = white.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
   const bErr = black.__consoleErrors.filter(e => !/favicon|net::ERR/i.test(e));
@@ -1312,6 +1682,11 @@ try {
   try { if (u2.__ctx) await u2.__ctx.close(); } catch {}
   try { if (ghost.__ctx) await ghost.__ctx.close(); } catch {}
   try { if (u3.__ctx) await u3.__ctx.close(); } catch {}
+  try { if (tbA.__ctx) await tbA.__ctx.close(); } catch {}
+  try { if (tbB.__ctx) await tbB.__ctx.close(); } catch {}
+  try { if (snd1.__ctx) await snd1.__ctx.close(); } catch {}
+  try { if (snd2.__ctx) await snd2.__ctx.close(); } catch {}
+  try { if (snd3.__ctx) await snd3.__ctx.close(); } catch {}
   try { if (serverProc && serverProc.exitCode === null) serverProc.kill('SIGTERM'); } catch {}
   await sleep(150);
   try {
