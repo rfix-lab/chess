@@ -1,0 +1,163 @@
+{
+  "base": "http://127.0.0.1:34567",
+  "rows": [
+    {
+      "test": "F4 logged-in stack @ 390x844: identical width/center-x/height (min 56px), uniform gaps [8,8,8], scrollWidth 390 == innerWidth 390, all four visible",
+      "status": "PASS",
+      "detail": "rects=[{\"id\":\"play-button\",\"w\":358,\"h\":56,\"cx\":195,\"top\":321.75},{\"id\":\"users-button\",\"w\":358,\"h\":56,\"cx\":195,\"top\":385.75},{\"id\":\"account-link\",\"w\":358,\"h\":56,\"cx\":195,\"top\":449.75},{\"id\":\"logout-button\",\"w\":358,\"h\":56,\"cx\":195,\"top\":513.75}] gaps=[8,8,8] gapsUnique=true visible=true stackGap=8px authedGap=normal scroll=390/390 err=[]"
+    },
+    {
+      "test": "F4 logged-in stack @ 1280x900: identical width/center-x/height (min 56px), uniform gaps [8,8,8], scrollWidth 1280 == innerWidth 1280, all four visible",
+      "status": "PASS",
+      "detail": "rects=[{\"id\":\"play-button\",\"w\":440,\"h\":56,\"cx\":640,\"top\":349.75},{\"id\":\"users-button\",\"w\":440,\"h\":56,\"cx\":640,\"top\":413.75},{\"id\":\"account-link\",\"w\":440,\"h\":56,\"cx\":640,\"top\":477.75},{\"id\":\"logout-button\",\"w\":440,\"h\":56,\"cx\":640,\"top\":541.75}] gaps=[8,8,8] gapsUnique=true visible=true stackGap=8px authedGap=normal scroll=1280/1280 err=[]"
+    },
+    {
+      "test": "F4 guest state @390: stack [Играть][Пользователи][Вход][Регистрация] same metrics (width/center-x, height>=44), #authed hidden, no h-overflow",
+      "status": "PASS",
+      "detail": "rects=[{\"id\":\"play-button\",\"w\":358,\"h\":56,\"cx\":195},{\"id\":\"users-button\",\"w\":358,\"h\":56,\"cx\":195},{\"id\":\"login-button\",\"w\":358,\"h\":56,\"cx\":195},{\"id\":\"register-button\",\"w\":358,\"h\":56,\"cx\":195}] stackWidth=358 scroll=390/390"
+    },
+    {
+      "test": "E2E row A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200)",
+      "status": "PASS",
+      "detail": "user=restore_3z91kq; form hidden, [Вход]/[Регистрация] hidden (contract 36), Кабинет/Выход visible, success line shows the username"
+    },
+    {
+      "test": "E2E row X6 invitee lobby shows the invite row: inviter name, Elo 1500, method «Рапид», [Принять] -> /game?matchId",
+      "status": "PASS",
+      "detail": "row=\"u1_y55xsp (Elo 1500) — метод: РапидПринять\"; accept=</game?matchId=lt408rpo> Принять"
+    },
+    {
+      "test": "E2E lobby rows (A1, X6) from real harness: both PASS",
+      "status": "PASS",
+      "detail": "harness exit=0; ran A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200) | X6 invitee lobby shows the invite row: inviter name, Elo 1500, method «Рапид», [Принять] -> /game?matchId"
+    }
+  ],
+  "metrics": {
+    "390x844": {
+      "rects": [
+        {
+          "id": "play-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195,
+          "top": 321.75
+        },
+        {
+          "id": "users-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195,
+          "top": 385.75
+        },
+        {
+          "id": "account-link",
+          "w": 358,
+          "h": 56,
+          "cx": 195,
+          "top": 449.75
+        },
+        {
+          "id": "logout-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195,
+          "top": 513.75
+        }
+      ],
+      "gaps": [
+        8,
+        8,
+        8
+      ],
+      "stackGap": "8px",
+      "authedGap": "normal",
+      "scrollWidth": 390,
+      "innerWidth": 390,
+      "shellWidth": 358,
+      "stackWidth": 358
+    },
+    "1280x900": {
+      "rects": [
+        {
+          "id": "play-button",
+          "w": 440,
+          "h": 56,
+          "cx": 640,
+          "top": 349.75
+        },
+        {
+          "id": "users-button",
+          "w": 440,
+          "h": 56,
+          "cx": 640,
+          "top": 413.75
+        },
+        {
+          "id": "account-link",
+          "w": 440,
+          "h": 56,
+          "cx": 640,
+          "top": 477.75
+        },
+        {
+          "id": "logout-button",
+          "w": 440,
+          "h": 56,
+          "cx": 640,
+          "top": 541.75
+        }
+      ],
+      "gaps": [
+        8,
+        8,
+        8
+      ],
+      "stackGap": "8px",
+      "authedGap": "normal",
+      "scrollWidth": 1280,
+      "innerWidth": 1280,
+      "shellWidth": 440,
+      "stackWidth": 440
+    },
+    "guest390": {
+      "rects": [
+        {
+          "id": "play-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195
+        },
+        {
+          "id": "users-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195
+        },
+        {
+          "id": "login-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195
+        },
+        {
+          "id": "register-button",
+          "w": 358,
+          "h": 56,
+          "cx": 195
+        }
+      ],
+      "widthsUnique": true,
+      "cxsUnique": true,
+      "heightsMin": 56,
+      "form": {
+        "0": "auth-card",
+        "1": "hide"
+      },
+      "authedHidden": true,
+      "stackWidth": 358,
+      "scrollWidth": 390,
+      "innerWidth": 390
+    }
+  },
+  "user": "lobby_f4_w7dd6d"
+}

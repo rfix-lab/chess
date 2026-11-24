@@ -49,10 +49,14 @@ body {
 }
 
 /* --- Big action stack.
-   [Играть] is the ONE saturated element on the page (primary, accent fill,
-   60px) — the visually dominant card. [Пользователи] and [Вход] are
-   secondary surface cards at the same height; [Регистрация] is the quiet
-   ghost. Equal widths keep the stack reading as one object. */
+   F4 (contract 38): the stack is the ONE aligned object in both auth states.
+   Logged in: [Играть][Пользователи] (primary cards) + the transparent
+   #authed wrapper holding [Кабинет][Выйти] — all four direct children share
+   identical width/height and the stack's uniform gap (var(--sp-2)). Guest:
+   [Играть][Пользователи][Вход][Регистрация] with the same metrics (#authed
+   is .hide = display:none, no slot). [Играть] stays the ONE saturated element
+   (primary, accent fill); [Пользователи]/[Кабинет] are secondary surface cards;
+   [Выйти]/[Регистрация] are quiet ghosts. */
 .action-stack {
   width: 100%;
   margin: var(--sp-4) 0;
@@ -63,7 +67,7 @@ body {
 
 .big-btn {
   width: 100%;
-  height: 60px;               /* >= 56px contract 32 */
+  height: 56px;               /* F4: 58px bordered, same footprint as #authed children */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,10 +138,12 @@ body {
   background: var(--card-2);
 }
 
-/* [Регистрация] — ghost: same width, shorter (~40px), quietest card. */
+/* [Регистрация] — ghost: same width AND height as the stack (F4 — one aligned
+   metric for every state); the dashed border + dim color mark it as the
+   quietest action. */
 .mid-btn {
   width: 100%;
-  height: 40px;
+  height: 56px; /* content box; 1px borders => 58px, same as .big-btn */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -331,50 +337,73 @@ button:active {
   transform: translateY(-1px);
 }
 
-/* --- Authenticated controls (Кабинет / Выйти pill pair) --- */
+/* --- Authenticated controls (F4: nested INSIDE #action-stack, one aligned
+   row of the stack). #authed stays the JS/E2E hook: indexSockets.js toggles
+   its .hide/.show. When SHOWN it uses `display: contents` — the wrapper
+   vanishes from the layout and its two buttons become DIRECT flex items of
+   #action-stack, so all four stack rows share identical width/height and the
+   stack's single uniform gap (var(--sp-2)); no nested gap can diverge.
+   .hide (display:none !important, tokens.css) still wins, so the guest state
+   gets no slot for the pair. */
 .authed {
   width: 100%;
-  margin: var(--sp-3) 0;
+}
+
+.authed.show {
+  display: contents;
+}
+
+/* [Кабинет] — secondary card, same footprint as [Пользователи]. */
+.account-link {
+  width: 100%;
+  height: 56px; /* content box; 1px borders => 58px, same as .big-btn */
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-}
-
-.account-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 40px;
-  padding: 8px 18px;
   text-decoration: none;
-  font-size: var(--fs-md);
+  font-family: var(--font);
+  font-size: 19px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--text);
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  transition: border-color var(--t), background var(--t);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  transition: transform var(--t-fast), background var(--t), border-color var(--t);
 }
 
 .account-link:hover {
-  border-color: var(--accent);
+  border-color: var(--line-strong);
   background: var(--card-2);
 }
 
+/* [Выйти] — quiet ghost, same footprint, dashed border marks the least
+   important action (matches the [Регистрация] ghost role). */
 .logout-btn {
-  min-height: 40px;
-  font-size: var(--fs-sm);
-  color: var(--text-dim);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px 16px;
+  width: 100%;
+  height: 56px; /* content box; 1px borders => 58px, same as .big-btn */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-lg);
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 19px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--t), border-color var(--t), background var(--t);
 }
 
 .logout-btn:hover {
   color: var(--text);
-  border-color: var(--line-strong);
+  border-color: var(--accent);
   background: var(--card-2);
+}
+
+.logout-btn:active {
+  transform: translateY(1px);
 }
 
 /* --- Feedback banners --- */
@@ -410,9 +439,6 @@ button:active {
 
 @media (max-width: 460px) {
   .actions {
-    flex-direction: column;
-  }
-  .authed {
     flex-direction: column;
   }
 }

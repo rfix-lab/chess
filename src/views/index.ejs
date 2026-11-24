@@ -23,11 +23,22 @@
 
   <!-- Big action stack (contract 32): [Вход]/[Играть] >= 56px, [Регистрация] ~40px.
        Contract 36: [Пользователи] added to the stack -> /users directory.
-       [Вход]/[Регистрация] are HIDDEN while logged in (indexSockets.js reflects
-       the /api/me state on load and on signin/logout). -->
+       F4 (contract 38): ONE aligned stack in both states — the #authed wrapper
+       (Кабинет/Выйти) is nested INSIDE the stack as a transparent flex child, so
+       a logged-in user sees exactly [Играть][Пользователи][Кабинет][Выйти] with
+       identical widths/heights/gaps; a guest sees [Играть][Пользователи][Вход]
+       [Регистрация] (Кабинет/Выйти hidden). [Вход]/[Регистрация] are HIDDEN while
+       logged in (indexSockets.js reflects the /api/me state on load and on
+       signin/logout). -->
   <div id="action-stack" class="action-stack">
     <button id="play-button" class="big-btn">Играть</button>
     <button id="users-button" class="big-btn">Пользователи</button>
+    <!-- Authenticated controls (Кабинет/Выйти) now part of the stack (F4);
+         #authed remains the JS/E2E hook indexSockets.js toggles. -->
+    <div id="authed" class="authed hide">
+      <a href="/account" id="account-link" class="account-link">Кабинет</a>
+      <button id="logout-button" class="logout-btn" onclick="doLogout()">Выйти</button>
+    </div>
     <button id="login-button" class="big-btn">Вход</button>
     <button id="register-button" class="mid-btn">Регистрация</button>
   </div>
@@ -54,12 +65,6 @@
   <div id="invites" class="invites hide">
     <h2>Приглашения</h2>
     <div id="invites-list"></div>
-  </div>
-
-  <!-- Authenticated controls — visible when the sessionID cookie is present. -->
-  <div id="authed" class="authed hide">
-    <a href="/account" id="account-link" class="account-link">Кабинет</a>
-    <button id="logout-button" class="logout-btn" onclick="doLogout()">Выйти</button>
   </div>
 
   <div id="auth-success" class="auth-note hide"></div>
