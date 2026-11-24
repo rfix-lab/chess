@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import bcrypt from 'bcrypt';
 import { loadUsersFile, authenticateUser, validateSession, saveUsersFile, loadSessionsFile, saveSessionsFile, attachSessionsToUsers, USERS_CSV } from './src/lib/auth.js';
 import { loadGames, GAMES_CSV, GAMES_CSV_HEADER, GAMES_CSV_HEADER_LEGACY } from './src/lib/games.js';
@@ -1881,8 +1882,240 @@ async function test() {
     sc.close(); sd.close();
   }
 
+  // === T38 (contract 38, F1): takeback semantics per the owner's contract ===
+  // The player who JUST MOVED (currently NOT the side to move) presses
+  // "Взять назад" -> the OPPONENT gets the offer -> on accept the pre-move
+  // snapshot is restored and the turn returns to the requester.
+  //
+  // Ephemeral-port note (per contract): the runner (test/run.mjs) boots the
+  // server IN-PROCESS on listen(0) and passes TEST_URL, so 5500 is normally
+  // free; we still pre-check with ss -ltn to flag a rogue dev server early.
+  {
+    try {
+      if (execSync('ss -ltn 2>/dev/null || true', { encoding: 'utf8' }).split('\n').some(l => /:5500\s/.test(l)))
+        console.log('⚠️  T38 pre-check: port 5500 already listening — tests target TEST_URL (' + BASE + ' anyway)');
+      else
+        console.log('T38 pre-check: no server on the default port 5500 (ephemeral ' + BASE + ')');
+    } catch (e) { console.log('T38 pre-check: ss unavailable (' + e + ')'); }
 
-  console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
+    const PIECE_MASK = 0b01111; // mirrors src/index.js: strips move/check/en-passant indicators
+    const stripBoard = (b) => b.map(r => r.map(v => v & PIECE_MASK));
+    const eqBoard = (a, b) => JSON.stringify(stripBoard(a)) === JSON.stringify(stripBoard(b));
+
+    // Dedicated match: A hosts a private match, B joins it -> A=player1Socket (white, 0), B=player2Socket (black, 1).
+    const mkMatch = async (a, b) => {
+      if (!a.connected || !b.connected) return null;
+      let id = null;
+      a.on('private-match', (x) => { if (id === null) id = x; });
+      a.emit('private-match', null);
+      const r = await new Promise(res => { a.once('private-match', res); setTimeout(() => res(id), 2000); });
+      id = r || id;
+      if (!id) return null;
+      // Record b's startGame in a flag IMMEDIATELY: the server can emit it the
+      // instant b auths, before the awaiting promise's listener is attached —
+      // the same race T32's invite flow handles with a state variable.
+      let bSeated = null;
+      b.on('startGame', (c, i) => { if (bSeated === null) bSeated = (c === 1 && i === id); });
+      a.emit('auth', null, id); // host (A) seats itself as player1/white
+      b.emit('auth', null, id); // opponent (B) joins as player2/black
+      const ok = await new Promise(res => {
+        const d = (v) => res(!!v);
+        const on = (c, i) => d(c === 1 && i === id);
+        b.once('startGame', on);
+        setTimeout(() => d(bSeated), 2000);
+      });
+      return ok ? id : null;
+    };
+
+    // (0) no history at all -> Russian takebackError, no offer anywhere.
+    {
+      const a = io(BASE, { transports: ['websocket'] });
+      const b = io(BASE, { transports: ['websocket'] });
+      await Promise.race([Promise.all([new Promise(r => a.on('connect', r)), new Promise(r => b.on('connect', r))]), sleep(3000)]);
+      const id = await mkMatch(a, b);
+      let errA = null, offerB = null;
+      a.on('takebackError', (m) => { if (errA === null) errA = m; });
+      b.on('takebackOfferReceived', (o) => { if (offerB === null) offerB = o; });
+      a.emit('takebackRequest', id); // (1) no history yet
+      await waitFor(() => errA !== null, 3000);
+      a.emit('takebackRequest', id);  // (2) immediate retry -> rate-limited, silent
+      await sleep(300);
+      if (errA === 'Ещё не было сделано ни одного хода' && offerB === null)
+        pass('T38a0: takeback request with no move history -> takebackError "Ещё не было сделано ни одного хода", no offer delivered');
+      else
+        fail('T38a0: no-history request', `err=${JSON.stringify(errA)} offer=${JSON.stringify(offerB)}`);
+      a.close(); b.close();
+    }
+
+    // (a) the side TO MOVE requests -> rejected with the Russian "nothing to undo" text.
+    {
+      const a = io(BASE, { transports: ['websocket'] });
+      const b = io(BASE, { transports: ['websocket'] });
+      await Promise.race([Promise.all([new Promise(r => a.on('connect', r)), new Promise(r => b.on('connect', r))]), sleep(3000)]);
+      const id = await mkMatch(a, b);
+      let errB = null, errA = null, offerB = null, offerA = null, turnA = null;
+      a.on('validated', (bd, t) => { turnA = t; });
+      b.on('takebackError', (m) => { if (errB === null) errB = m; });
+      a.on('takebackError', (m) => { if (errA === null) errA = m; });
+      b.on('takebackOfferReceived', (o) => { if (offerB === null) offerB = o; });
+      a.on('takebackOfferReceived', (o) => { if (offerA === null) offerA = o; });
+      a.emit('move', id, { x: 4, y: 6 }, { x: 4, y: 4 }); // white e2-e4 -> now BLACK's turn
+      await waitFor(() => turnA === 1, 3000);
+      if (turnA === 1) {
+        // BLACK (b) is the side TO MOVE and has not yet moved: its request
+        // must be rejected by the new guard (requesterColor === turnState).
+        b.emit('takebackRequest', id);
+        await waitFor(() => errB !== null, 3000);
+        // Second request in the rate-limit window: still under the 5-per-window
+        // cap, so it errors again with the same text (the latch stays null).
+        b.emit('takebackRequest', id);
+        await sleep(200);
+      }
+      await sleep(200);
+      if (turnA === 1 && errB === 'Сейчас ваш ход - отменять нечего' && offerA === null && offerB === null)
+        pass('T38a: side TO MOVE requests -> takebackError "Сейчас ваш ход - отменять нечего", no offer delivered');
+      else
+        fail('T38a: side-to-move request rejected', `turnA=${turnA} errB=${JSON.stringify(errB)} errA=${JSON.stringify(errA)} offerA=${JSON.stringify(offerA)} offerB=${JSON.stringify(offerB)}`);
+      a.close(); b.close();
+    }
+
+    // (b) the side that JUST MOVED requests -> the opponent receives takebackOfferReceived.
+    {
+      const a = io(BASE, { transports: ['websocket'] });
+      const b = io(BASE, { transports: ['websocket'] });
+      await Promise.race([Promise.all([new Promise(r => a.on('connect', r)), new Promise(r => b.on('connect', r))]), sleep(3000)]);
+      const id = await mkMatch(a, b);
+      let turnB = null, offerB = null, offerA = null;
+      b.on('validated', (bd, t) => { turnB = t; });
+      b.on('takebackOfferReceived', (o) => { if (offerB === null) offerB = o; });
+      a.on('takebackOfferReceived', (o) => { if (offerA === null) offerA = o; });
+      a.emit('move', id, { x: 4, y: 6 }, { x: 4, y: 4 }); // white e2-e4 -> white (A) JUST MOVED, now black's turn
+      await waitFor(() => turnB === 1, 3000);
+      a.emit('takebackRequest', id); // requester = the side that just moved (white/A); offer goes to B
+      await waitFor(() => offerB !== null, 3000);
+      if (turnB === 1 && offerB && offerB.from === 0 && offerA === null)
+        pass('T38b: side that JUST MOVED (white) requests -> opponent receives takebackOfferReceived {from:0}');
+      else
+        fail('T38b: just-moved request', `turnB=${turnB} offerB=${JSON.stringify(offerB)} offerA=${JSON.stringify(offerA)}`);
+      a.close(); b.close();
+    }
+
+    // (c) decline -> the REQUESTER socket (not the responder) gets takebackDeclined.
+    // Both seat orders: p1=just-moved (white) / p2=just-moved (black).
+    for (const order of [1, 2]) {
+      const a = io(BASE, { transports: ['websocket'] });
+      const b = io(BASE, { transports: ['websocket'] });
+      await Promise.race([Promise.all([new Promise(r => a.on('connect', r)), new Promise(r => b.on('connect', r))]), sleep(3000)]);
+      const id = await mkMatch(a, b);
+      const declineA = { v: null }, declineB = { v: null };
+      a.on('takebackDeclined', () => { declineA.v = 'p1'; });
+      b.on('takebackDeclined', () => { declineB.v = 'p2'; });
+      let turnA = null, turnB = null, offerB = null, offerA = null;
+      a.on('validated', (bd, t) => { turnA = t; });
+      b.on('validated', (bd, t) => { turnB = t; });
+      b.on('takebackOfferReceived', (o) => { if (offerB === null) offerB = o; });
+      a.on('takebackOfferReceived', (o) => { if (offerA === null) offerA = o; });
+
+      if (order === 1) {
+        // p1 (white) just moved; black (p2) is to move -> white requests, offer to B.
+        a.emit('move', id, { x: 4, y: 6 }, { x: 4, y: 4 });
+        await waitFor(() => turnA === 1, 3000);
+        a.emit('takebackRequest', id);
+        await waitFor(() => offerB !== null, 3000);
+        b.emit('takebackResponse', id, false); // black (responder) declines
+        await waitFor(() => declineA.v !== null || declineB.v !== null, 3000);
+        if (offerB && declineA.v === 'p1' && declineB.v === null)
+          pass(`T38c${order}: decline (p1 just moved) -> REQUESTER p1 gets takebackDeclined, responder p2 gets none`);
+        else
+          fail(`T38c${order}: decline routing`, `declineA=${declineA.v} declineB=${declineB.v} offer=${JSON.stringify(offerB)}`);
+      } else {
+        // p2 (black) just moved; white (p1) is to move -> black requests, offer to A.
+        a.emit('move', id, { x: 4, y: 6 }, { x: 4, y: 4 }); // white e2-e4
+        await waitFor(() => turnA === 1, 3000);
+        b.emit('move', id, { x: 4, y: 1 }, { x: 4, y: 3 }); // black e7-e5 -> black JUST MOVED
+        await waitFor(() => turnB === 0, 3000);
+        b.emit('takebackRequest', id); // requester = p2 (black, just moved)
+        await waitFor(() => offerA !== null, 3000); // offer goes to white (A)
+        a.emit('takebackResponse', id, false); // white (responder) declines
+        await waitFor(() => declineA.v !== null || declineB.v !== null, 3000);
+        if (offerA && offerA.from === 1 && declineB.v === 'p2' && declineA.v === null)
+          pass(`T38c${order}: decline (p2 just moved) -> REQUESTER p2 gets takebackDeclined, responder p1 gets none`);
+        else
+          fail(`T38c${order}: decline routing`, `declineA=${declineA.v} declineB=${declineB.v} offerA=${JSON.stringify(offerA)}`);
+      }
+      a.close(); b.close();
+    }
+
+    // (d) accept -> both receive takebackAccepted; board = pre-move snapshot;
+    //     turn returns to the REQUESTER's color. We undo black's SECOND move
+    //     (e7-e5), so the pre-move snapshot is the board AFTER e2-e4 — which we
+    //     actually observe via the validated push (the server only pushes the
+    //     board after a move, never the bare start position).
+    {
+      const a = io(BASE, { transports: ['websocket'] });
+      const b = io(BASE, { transports: ['websocket'] });
+      await Promise.race([Promise.all([new Promise(r => a.on('connect', r)), new Promise(r => b.on('connect', r))]), sleep(3000)]);
+      const id = await mkMatch(a, b);
+      let boardAfterE4 = null, turnA = null, turnB = null;
+      let accA = null, accB = null, accTurnA = null;
+      a.on('validated', (bd, t) => { turnA = t; if (t === 1) boardAfterE4 = bd.map(r => r.slice()); });
+      b.on('validated', (bd, t) => { turnB = t; });
+      a.on('takebackAccepted', (bd, t) => { accA = bd; accTurnA = t; });
+      b.on('takebackAccepted', (bd, t) => { accB = bd; accTurnA = t; });
+      let offerA = null;
+      a.on('takebackOfferReceived', (o) => { if (offerA === null) offerA = o; });
+
+      a.emit('move', id, { x: 4, y: 6 }, { x: 4, y: 4 }); // white e2-e4 -> boardAfterE4, turn 1
+      await waitFor(() => boardAfterE4 !== null, 3000);
+      b.emit('move', id, { x: 4, y: 1 }, { x: 4, y: 3 }); // black e7-e5 -> turn 0; black JUST MOVED
+      await waitFor(() => turnB === 0, 3000);
+      b.emit('takebackRequest', id); // requester = black (1), the side that just moved
+      await waitFor(() => offerA !== null, 3000); // offer to white (A)
+      a.emit('takebackResponse', id, true); // white (responder) accepts
+      await waitFor(() => accA !== null && accB !== null, 3000);
+
+      if (accA && accB && eqBoard(accA, boardAfterE4) && eqBoard(accB, boardAfterE4) && accTurnA === 1)
+        pass('T38d: accept -> both receive takebackAccepted, board equals pre-move snapshot, turnState = requester color (1)');
+      else
+        fail('T38d: accept restores snapshot', `accTurnA=${accTurnA} eqA=${eqBoard(accA || [], boardAfterE4 || [])} eqB=${eqBoard(accB || [], boardAfterE4 || [])} e4set=${!!boardAfterE4}`);
+      a.close(); b.close();
+    }
+
+    // (e) after a decline, the requester makes another move then requests again -> offer delivered (latch cleared).
+    {
+      const a = io(BASE, { transports: ['websocket'] });
+      const b = io(BASE, { transports: ['websocket'] });
+      await Promise.race([Promise.all([new Promise(r => a.on('connect', r)), new Promise(r => b.on('connect', r))]), sleep(3000)]);
+      const id = await mkMatch(a, b);
+      let offerB = 0, turnA = null;
+      a.on('validated', (bd, t) => { turnA = t; });
+      b.on('takebackOfferReceived', () => { offerB++; });
+      const declineA = { v: null };
+      a.on('takebackDeclined', () => { declineA.v = 'p1'; });
+
+      // White moves, requests, black declines -> latch set to 'declined'.
+      a.emit('move', id, { x: 4, y: 6 }, { x: 4, y: 4 });
+      await waitFor(() => turnA === 1, 3000);
+      a.emit('takebackRequest', id);
+      await waitFor(() => offerB === 1, 3000);
+      b.emit('takebackResponse', id, false);
+      await waitFor(() => declineA.v === 'p1', 3000);
+
+      // Black now moves (turnState=1 -> 0), then white moves again, then requests.
+      b.emit('move', id, { x: 4, y: 1 }, { x: 4, y: 3 });
+      await waitFor(() => turnA === 0, 3000);
+      a.emit('move', id, { x: 6, y: 7 }, { x: 5, y: 5 }); // Nf3
+      await waitFor(() => turnA === 1, 3000);
+      a.emit('takebackRequest', id);
+      await waitFor(() => offerB === 2, 3000);
+
+      if (declineA.v === 'p1' && offerB === 2)
+        pass('T38e: after decline, requester moves again then requests -> second offer delivered (decline latch cleared by the move)');
+      else
+        fail('T38e: latch cleared', `declineA=${declineA.v} offers=${offerB}`);
+      a.close(); b.close();
+    }
+  }
   return failed === 0;
 }
 

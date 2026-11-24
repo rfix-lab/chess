@@ -609,6 +609,11 @@ io.on('connection', socket => {
     };
     match.stateHistory.push(snapshot);
 
+    // Contract 38 (F1): a new move supersedes any earlier takeback exchange —
+    // clear the latch (e.g. 'declined') so a previous decline does not poison
+    // future requests for the rest of the match.
+    match.takebackOffered = null;
+
     let sentBoard = match.boardState.map((arr) => { return arr.slice(); });
     const piece = match.boardState[fromCoords.y][fromCoords.x];
     const destPiece = match.boardState[toCoords.y][toCoords.x];
@@ -1194,18 +1199,23 @@ io.on('connection', socket => {
       return;
     }
     if (!match || match.gameEnded) return;
-    if (match.stateHistory.length === 0) return;
+    if (match.stateHistory.length === 0) {
+      socket.emit('takebackError', 'Ещё не было сделано ни одного хода');
+      return;
+    }
 
-    // Only the player whose turn it is can request takeback
+    // Contract 38 (F1): the requester is the player who JUST MOVED — the side
+    // that is currently NOT to move (they are the only ones with a move to
+    // undo). If it is the requester's turn, there is nothing to cancel yet.
     const requesterColor = match.player1Socket.id === socket.id ? 0 : 1;
-    if (requesterColor !== match.turnState) {
-      socket.emit('takebackError', 'Not your turn to request takeback');
+    if (requesterColor === match.turnState) {
+      socket.emit('takebackError', 'Сейчас ваш ход - отменять нечего');
       return;
     }
 
     // Check if already declined once
     if (match.takebackOffered === 'declined') {
-      socket.emit('takebackError', 'Takeback already declined');
+      socket.emit('takebackError', 'Возврат хода уже отклонён');
       return;
     }
 
@@ -1247,9 +1257,11 @@ io.on('connection', socket => {
       match.takebackOffered = null;
     } else {
       match.takebackOffered = 'declined';
-      // Notify the requester
-      const requesterColor = match.player1Socket.id !== socket.id ? 0 : 1;
-      const requester = match.player1Socket.id === requesterColor ? match.player1Socket : match.player2Socket;
+      // Notify the requester. Contract 38 (F1): the responder is the side to
+      // move, so the requester is simply the OTHER socket — the old
+      // requesterColor arithmetic compared a socket id STRING against 0/1 and
+      // always resolved to player2Socket (the responder when they were p1).
+      const requester = (socket.id === match.player1Socket.id) ? match.player2Socket : match.player1Socket;
       if (requester) requester.emit('takebackDeclined', {});
     }
   });

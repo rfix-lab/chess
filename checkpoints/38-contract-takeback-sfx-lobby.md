@@ -20,7 +20,7 @@ Owner request 2026-11-24 (screenshot of logged-in lobby attached):
 - Lobby: logged-in view stacks differ in width/alignment (index.ejs/index.css, contract-32 B1 layout).
 
 ## Stages (micro)
-- [ ] F1 server: requester = side NOT to move (just moved); fix decline requester lookup; clear declined latch on next accepted move; Russian takebackError texts; unit rows in test-chess.mjs.
+- [x] F1 server: requester = side NOT to move (just moved); fix decline requester lookup; clear declined latch on next accepted move; Russian takebackError texts; unit rows in test-chess.mjs. — DONE 2026-11-24 (subagent): src/index.js takebackRequest guard negated (requesterColor === match.turnState → takebackError «Сейчас ваш ход - отменять нечего»); empty stateHistory now emits «Ещё не было сделано ни одного хода»; decline routed to the NON-responder socket (requesterColor arithmetic deleted); move application clears match.takebackOffered; all takebackError texts Russian. Tests: T38a0/T38a/T38b/T38c1/T38c2/T38d/T38e all green, npm test ALL TESTS PASSED.
 - [ ] F2 client game: takeback UX — button enabled only when ≥1 move made; decline re-enables later (no permanent lock); modal/texts Russian; takebackError surfaced in status line.
 - [ ] F3 client audio: generate click.mp3 (short sharp click); validated → 1 click on capture (replace capture.mp3 usage), 2 quick clicks (~90 ms apart) when resulting position puts the side-to-move's king under attack; keep wrong-move duff.
 - [ ] F4 lobby: single aligned full-width button stack in logged-in state (Играть, Пользователи, Кабинет, Выйти), even gaps; screenshots 390/1280.  <!-- DONE 2026-11-24, see completion line under Gates -->
