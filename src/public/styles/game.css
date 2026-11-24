@@ -512,3 +512,88 @@ canvas#cnv {
    themes. No earlier .cap-piece rule sets color, so nothing conflicts. */
 .cap-piece.cap-dark { color:#11161f; -webkit-text-stroke:.6px rgba(233,238,249,.75); text-shadow:0 0 2px rgba(233,238,249,.35); }
 .cap-piece.cap-light { color:#eef2fb; -webkit-text-stroke:.6px rgba(17,22,31,.75); text-shadow:0 0 2px rgba(0,0,0,.5); }
+/* contract-37 D-b: final visual polish pass on the single --game-col game page
+   (header -> status -> captured strip -> board -> captured strip -> actions).
+   Verified with puppeteer geometry at 390x844 and 1280x900; before/after
+   numbers in checkpoints/37s-polish.md.
+
+   0) Header title centering: .game-header is position:relative and
+      .nav-title is absolute at left:50% + translateX(-50%), so "Партия" is
+      centered in the COLUMN regardless of the asymmetric flex row (the 105px
+      back button is ~2x wider than the 52px right spacer, which used to shift
+      the flex:1 title's center ~26px right of the column center — measured
+      221.5 vs 195 at 390, 666.5 vs 640 at 1280; after: delta 0). max-width +
+      ellipsis guard a very long title at narrow widths.
+   1) Vertical rhythm: every inter-block gap is var(--sp-3)=12px, no doubling.
+      Each .captured-row owns a 12px gap on BOTH sides (margin: var(--sp-3) 0):
+      header->strip, strip->board and board->strip all read 12px. #status sets
+      margin-top:0 (its strip-side gap is already the white strip's bottom
+      margin — adjacent block margins collapse, they never stack) and keeps
+      12px below for status->actions. .game-header keeps D-a's top padding
+      (no bottom margin, which would stack with the black strip's top margin).
+   2) Tap targets + single row: every action-bar control is height:44px
+      (fixed, so all six are exactly 44px tall — >=44px tap targets). The bar
+      uses gap:1px, a compact fs-xs(12px) label size and -0.7px
+      letter-spacing, with the method select pinned to 70px (flex 0 0 70px +
+      min-width:0 beat its intrinsic content min-width), so all six controls
+      fit the 456px bar in ONE row at 1280 (443.6px + gaps); at 390 (347px
+      bar) the same layout wraps to a balanced two-row grid with no
+      horizontal overflow (scrollWidth == 390).
+   3) Status pill: width:fit-content (was full --game-col) so the pill hugs
+      its text and stays centered by its auto margins; max-width caps it to
+      the column, so it can never be wider than the board.
+   4) Captured strips: min-height:52px + align-items:baseline. 52px is the
+      height of a FILLED strip at the 24px desktop font (line-height 1.5 ->
+      36px + 6px*2 padding + 2px border); an EMPTY strip renders at the same
+      52px and the 43px mobile filled strip fits inside => baseline-aligned
+      glyphs, no board jump when captures appear (jump 0 at 1280, <=1px 390).
+   5) S3 cap-dark/cap-light rules untouched (verbatim above this block). */
+
+.game-header {
+  position: relative;
+}
+
+.game-header .nav-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.captured-row {
+  align-items: baseline;
+  margin: var(--sp-3) 0;
+  min-height: 52px;
+}
+
+#status {
+  width: fit-content;
+  max-width: var(--game-col);
+  margin: 0 auto var(--sp-3);
+}
+
+.game-actions {
+  gap: 1px;
+}
+
+.game-actions > .game-btn {
+  height: 44px;
+  padding: 9px 3px;
+  font-size: var(--fs-xs);
+  letter-spacing: -0.7px;
+  white-space: nowrap;
+}
+
+.game-actions #method-select {
+  height: 44px;
+  min-width: 0;
+  flex: 0 0 70px;
+  width: 70px;
+  padding: 9px 4px;
+  font-size: var(--fs-xs);
+  letter-spacing: -0.7px;
+}
