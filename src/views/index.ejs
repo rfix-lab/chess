@@ -1,56 +1,81 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chess Lobby</title>
+  <title>Шахматы</title>
 
+  <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/index.css">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/events.js"></script>
 </head>
 
 <body>
+  <div class="lobby-shell">
   <header class="brand">
-    <h1>♞ Chess</h1>
-    <p>Sign in or jump straight into a game</p>
+    <h1>♞ Шахматы</h1>
+    <p>Войдите или сразу сыграйте</p>
   </header>
 
-  <div id="form">
+  <!-- Big action stack (contract 32): [Вход]/[Играть] >= 56px, [Регистрация] ~40px.
+       Contract 36: [Пользователи] added to the stack -> /users directory.
+       [Вход]/[Регистрация] are HIDDEN while logged in (indexSockets.js reflects
+       the /api/me state on load and on signin/logout). -->
+  <div id="action-stack" class="action-stack">
+    <button id="play-button" class="big-btn">Играть</button>
+    <button id="users-button" class="big-btn">Пользователи</button>
+    <button id="login-button" class="big-btn">Вход</button>
+    <button id="register-button" class="mid-btn">Регистрация</button>
+  </div>
+
+  <!-- Login / registration form (revealed by [Вход] or [Регистрация]). -->
+  <div id="form" class="auth-card hide">
+    <h2 id="form-title">Вход</h2>
     <div class="field">
-      <label for="username">Username</label>
+      <label for="username">Имя пользователя</label>
       <input type="text" name="username" id="username" list="username-list" autocomplete="off">
       <datalist id="username-list"></datalist>
     </div>
     <div class="field">
-      <label for="password">Password</label>
+      <label for="password">Пароль</label>
       <input type="password" name="password" id="password">
     </div>
     <div class="actions">
-      <button class="btn-primary" onclick="submitLoginDetails()">Sign In</button>
-      <button class="btn-secondary" onclick="submitSignUpDetails()">Sign Up</button>
+      <button class="btn-primary" id="submit-auth" onclick="submitAuth()">Войти</button>
     </div>
   </div>
 
-  <div class="guest">
-    <button onclick="play()" id="play-button" class="btn-primary">Play as Guest</button>
-    <button onclick="genLink()" id="play-button" class="btn-secondary">Generate play link</button>
-    <a href="" id="generated-link" class="hide"></a>
+  <!-- Invites (rendered from the server 'invites' event; contract 32 §3).
+       Each row: who invited, their Elo, method, [Принять] -> /game?matchId=. -->
+  <div id="invites" class="invites hide">
+    <h2>Приглашения</h2>
+    <div id="invites-list"></div>
+  </div>
+
+  <!-- Authenticated controls — visible when the sessionID cookie is present. -->
+  <div id="authed" class="authed hide">
+    <a href="/account" id="account-link" class="account-link">Кабинет</a>
+    <button id="logout-button" class="logout-btn" onclick="doLogout()">Выйти</button>
   </div>
 
   <div id="auth-success" class="auth-note hide"></div>
   <div id="auth-fail" class="auth-note hide">
-    <h3>Invalid credentials.</h3>
+    <h3>Неверный логин или пароль</h3>
   </div>
   <div id="signup-fail" class="auth-note hide">
-    <h3 id="signup-fail-usrnmexists" class="hide">Failed! User name already exists.</h3>
-    <h3 id="signup-fail-pswdlen" class="hide">Failed! Enter a non empty password.</h3>
-    <h3 id="signup-fail-pswdinvalid" class="hide">Failed! Username must be 3-32 characters: letters, digits, dot, underscore, dash.</h3>
+    <h3 id="signup-fail-usrnmexists" class="hide">Имя уже занято</h3>
+    <h3 id="signup-fail-pswdlen" class="hide">Введите непустой пароль</h3>
+    <h3 id="signup-fail-pswdinvalid" class="hide">Имя: 3–32 символа — буквы, цифры, точка, подчёркивание, дефис</h3>
   </div>
+  </div><!-- /.lobby-shell -->
 
   <script src="js/cookieUtil.js"></script>
+  <!-- Integration fix (contract 36): index.js defines the global `play` used by
+       wireBigButtons() in indexSockets.js — it must load FIRST. -->
   <script src="js/index.js"></script>
   <script src="js/indexSockets.js"></script>
 </body>

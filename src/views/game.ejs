@@ -7,18 +7,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chess</title>
 
+  <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/game.css">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <script src="/socket.io/socket.io.js"></script>
   <script>
     let matchId = <%- JSON.stringify(matchId) %>;
   </script>
 </head>
 
-<button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+<body>
+<!-- contract-37 D-a: header, status, captured rows, board and actions all share
+     the --game-col width (min(95vw, 480px)) defined in styles/game.css so the
+     page renders as one centered column. Do not reintroduce per-block widths. -->
+<button id="themeToggle" class="theme-toggle" onclick="toggleTheme()" title="Переключить тему">
   <span id="themeIcon">🌙</span>
 </button>
 
-<body>
+<!-- Page header (contract 36c): shared back-link pattern. -->
+<nav class="game-header">
+  <a href="/index" class="nav-back">← В лобби</a>
+  <h1 class="nav-title">Партия</h1>
+  <span class="nav-spacer"></span>
+</nav>
+
   <div id="game-container">
     <div id="captured-black" class="captured-row"></div>
     <canvas id="cnv"></canvas>
@@ -31,20 +43,46 @@
 
   <!-- Game action buttons -->
   <div id="game-actions" class="game-actions" style="display:none;">
-    <button id="btn-takeback" class="game-btn game-btn-info">Takeback</button>
-    <button id="btn-offer-draw" class="game-btn game-btn-secondary">Offer Draw</button>
-    <button id="btn-challenge" class="game-btn game-btn-warning">Challenge</button>
-    <button id="btn-resign" class="game-btn game-btn-danger">Resign</button>
+    <!-- Contract 32: game-link generation lives on the GAME page (was the lobby).
+         Works for guests AND logged-in users. -->
+    <button id="btn-game-link" class="game-btn game-btn-secondary">Ссылка на игру</button>
+    <!-- Invite UI: visible to REGISTERED users only (sessionID cookie present).
+         Hidden for guests by gameSockets.js before first paint. -->
+    <button id="btn-invite" class="game-btn game-btn-secondary" style="display:none;">Пригласить игрока</button>
+    <!-- Method selector (contract 36): ENABLED — Классика (standard) / Рапид
+         (rapid). The invite button sends the selected value. NOTE: rapid does
+         not change clocks yet — the game has no clock; the method is carried
+         end-to-end (invite -> match -> games.csv) for the future clock feature. -->
+    <select id="method-select" title="Метод">
+      <option value="standard">Классика</option>
+      <option value="rapid">Рапид</option>
+    </select>
+    <button id="btn-takeback" class="game-btn game-btn-secondary">Взять назад</button>
+    <button id="btn-offer-draw" class="game-btn game-btn-secondary">Предложить ничью</button>
+    <button id="btn-challenge" class="game-btn game-btn-warning">Вызов</button>
+    <button id="btn-resign" class="game-btn game-btn-danger">Сдаться</button>
+  </div>
+
+  <!-- Game link modal (contract 32): shows location.origin + /game?matchId=<id> + copy -->
+  <div id="gameLinkModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <h3>Ссылка на игру</h3>
+      <p id="game-link-text"></p>
+      <div class="modal-actions">
+        <button id="btn-game-link-copy" class="modal-btn modal-btn-primary">Копировать</button>
+        <button id="btn-game-link-close" class="modal-btn modal-btn-secondary">Закрыть</button>
+      </div>
+    </div>
   </div>
 
   <!-- Resign confirmation modal -->
   <div id="resignModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
-      <h3>Resign?</h3>
-      <p>Are you sure you want to resign? You will lose the game.</p>
+      <h3>Сдаться</h3>
+      <p>Подтвердите сдачу: партия будет проиграна.</p>
       <div class="modal-actions">
-        <button id="btn-resign-cancel" class="modal-btn modal-btn-secondary">Cancel</button>
-        <button id="btn-resign-confirm" class="modal-btn modal-btn-danger">Resign</button>
+        <button id="btn-resign-cancel" class="modal-btn modal-btn-secondary">Отмена</button>
+        <button id="btn-resign-confirm" class="modal-btn modal-btn-danger">Сдаться</button>
       </div>
     </div>
   </div>
@@ -52,11 +90,11 @@
   <!-- Incoming draw offer modal -->
   <div id="drawOfferModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
-      <h3>🤝 Draw Offer</h3>
-      <p>Your opponent has offered a draw.</p>
+      <h3>Предложение ничьей</h3>
+      <p>Соперник предлагает завершить партию вничью.</p>
       <div class="modal-actions">
-        <button id="btn-draw-decline" class="modal-btn modal-btn-secondary">Decline</button>
-        <button id="btn-draw-accept" class="modal-btn modal-btn-success">Accept</button>
+        <button id="btn-draw-decline" class="modal-btn modal-btn-secondary">Отклонить</button>
+        <button id="btn-draw-accept" class="modal-btn modal-btn-success">Принять</button>
       </div>
     </div>
   </div>
@@ -64,11 +102,11 @@
   <!-- Incoming challenge modal -->
   <div id="challengeModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
-      <h3>⚔️ Challenge</h3>
-      <p>Your opponent challenges you to resign.</p>
+      <h3>Вызов</h3>
+      <p>Соперник вызывает вас на сдачу.</p>
       <div class="modal-actions">
-        <button id="btn-challenge-decline" class="modal-btn modal-btn-secondary">Decline</button>
-        <button id="btn-challenge-accept" class="modal-btn modal-btn-success">Accept</button>
+        <button id="btn-challenge-decline" class="modal-btn modal-btn-secondary">Отклонить</button>
+        <button id="btn-challenge-accept" class="modal-btn modal-btn-success">Принять</button>
       </div>
     </div>
   </div>
@@ -76,11 +114,11 @@
   <!-- Incoming takeback offer modal -->
   <div id="takebackOfferModal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
-      <h3>↩️ Takeback Offer</h3>
-      <p>Your opponent wants to undo their last move.</p>
+      <h3>Взятие хода</h3>
+      <p>Соперник просит отменить последний ход.</p>
       <div class="modal-actions">
-        <button id="btn-takeback-decline" class="modal-btn modal-btn-secondary">Decline</button>
-        <button id="btn-takeback-accept" class="modal-btn modal-btn-success">Accept</button>
+        <button id="btn-takeback-decline" class="modal-btn modal-btn-secondary">Отклонить</button>
+        <button id="btn-takeback-accept" class="modal-btn modal-btn-success">Принять</button>
       </div>
     </div>
   </div>
@@ -94,15 +132,15 @@
       <div id="replay-box" style="display:none; margin: 10px 0;">
         <div id="replay-controls">
           <button id="replay-prev" class="modal-btn modal-btn-secondary" title="Предыдущий ход">⏮</button>
-          <button id="replay-play" class="modal-btn modal-btn-primary" title="Автопроигрывание (1 ход/сек)">▶ Play</button>
-          <button id="replay-pause" class="modal-btn modal-btn-secondary" title="Пауза">⏸</button>
-          <button id="replay-next" class="modal-btn modal-btn-secondary" title="Следующий ход">Next ⏭</button>
-          <button id="replay-reset" class="modal-btn modal-btn-secondary" title="К началу партии">⟲</button>
+          <button id="replay-play" class="modal-btn modal-btn-primary" title="Автопроигрывание (1 ход/сек)">Играть</button>
+          <button id="replay-pause" class="modal-btn modal-btn-secondary" title="Пауза">Пауза</button>
+          <button id="replay-next" class="modal-btn modal-btn-secondary" title="Следующий ход">Следующий ход</button>
+          <button id="replay-reset" class="modal-btn modal-btn-secondary" title="К началу партии">В начало</button>
         </div>
         <div id="replay-list" style="max-height: 200px; overflow-y: auto; margin: 8px 0; padding: 8px; background: #16213e; border-radius: 6px; font-size: 14px; line-height: 1.7;"></div>
       </div>
       <div class="modal-actions">
-        <button id="replay-back-lobby" onclick="document.getElementById('gameEndModal').style.display='none'; window.location.href='/index'" class="modal-btn modal-btn-primary">Back to Lobby</button>
+        <button id="replay-back-lobby" onclick="document.getElementById('gameEndModal').style.display='none'; window.location.href='/index'" class="modal-btn modal-btn-primary">В лобби</button>
       </div>
     </div>
   </div>
@@ -116,7 +154,7 @@
   <!-- Promotion selector modal -->
   <div id="promotionModal" class="promotion-modal" style="display:none;">
     <div class="promotion-content">
-      <h3>Choose a piece</h3>
+      <h3>Выберите фигуру</h3>
       <div id="promotionChoices" class="promotion-choices"></div>
     </div>
   </div>
@@ -124,9 +162,9 @@
   <!-- Repetition warning modal -->
   <div id="repetitionWarningModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
     <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:#1a1a2e; padding:30px; border-radius:12px; max-width:400px; text-align:center;">
-      <h3 style="color:#ffcc00;">⚠️ Внимание</h3>
+      <h3 style="color:#e0912b;">Внимание</h3>
       <p id="repetitionWarningText" style="color:#ccc;"></p>
-      <button onclick="document.getElementById('repetitionWarningModal').style.display='none'" style="margin-top:15px; padding:10px 30px; background:#333; color:#fff; border:none; border-radius:6px; cursor:pointer;">OK</button>
+      <button onclick="document.getElementById('repetitionWarningModal').style.display='none'" style="margin-top:15px; padding:10px 30px; background:#2a3347; color:#fff; border:1px solid #36415a; border-radius:8px; cursor:pointer;">Хорошо</button>
     </div>
   </div>
 </body>

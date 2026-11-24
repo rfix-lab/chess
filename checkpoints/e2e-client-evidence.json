@@ -1,0 +1,349 @@
+{
+  "env": {
+    "port": 19623,
+    "chromium": "/snap/bin/chromium",
+    "serverLog": "/tmp/e2e-client-server.log",
+    "time": "2026-11-23T23:18:00.620Z"
+  },
+  "matchId": "3vntqfuy",
+  "rows": [
+    {
+      "test": "S0 both guests seated in one private match; startGame(0/1) delivered",
+      "status": "PASS",
+      "detail": "white=\"Playing as white\", black=\"Playing as black\" (matchId 3vntqfuy; created by harness raw socket.io private-match — contract 32)"
+    },
+    {
+      "test": "S1 initial boards: normalised==start both pages; black raw==rotateBoard(start) — bug A regression",
+      "status": "PASS",
+      "detail": "white norm==start: true; black norm==start: true; black raw==rotated: true"
+    },
+    {
+      "test": "H1 enemy-piece touch (60ms press on e7): piece stays, no grab state",
+      "status": "PASS",
+      "detail": "board[1][4]=9 (want 9), holding=false"
+    },
+    {
+      "test": "H2 own-piece light click (60ms press on e2): piece restored after grab tick",
+      "status": "PASS",
+      "detail": "board[6][4]=1 (want 1), holding=false"
+    },
+    {
+      "test": "H3 selection highlight pixels land on e3, NOT on the transposed mirror d4",
+      "status": "PASS",
+      "detail": "e3 [85,100,138]->[94,143,120] tinted=true; d4 [85,100,138]->[85,100,138] clean=true"
+    },
+    {
+      "test": "H4 drag own piece to illegal square (e2->e5 drag) -> rejected, piece stays on e2, board intact",
+      "status": "PASS",
+      "detail": "board[6][4]=1 (want 1), pieces=32 (want 32), appliedLines=0 (want 0)"
+    },
+    {
+      "test": "E-ill illegal move e2->e5 (raw socket emit) -> server REJECTED + canvas shake, board unchanged",
+      "status": "PASS",
+      "detail": "applied 0->0 shake=true boardUnchanged=true serverRejLine=[DEBUG] 2026-11-23T23:18:13.237Z move: REJECTED reason=illegal matchId= 3vntqfuy turnState= 0 mover-is-p1= true from= 6:"
+    },
+    {
+      "test": "Hm1-white highlights on select(4,6) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[4,4],[4,5]] engine=[[4,4],[4,5]] equal=true"
+    },
+    {
+      "test": "M1 e2->e4 (white, drag) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=1 (expected >= 1); last: [DEBUG] 2026-11-23T23:18:14.187Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 6:4 to= 4:4"
+    },
+    {
+      "test": "S1 board SYNC after move (both pages == expected server board e2->e4)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "M1 en-passant indicator on e5 (server 4,4) present on BOTH pages",
+      "status": "PASS",
+      "detail": "white bit=64 black bit=64 (expected 64)"
+    },
+    {
+      "test": "Hm2-black highlights on select(3,6) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[3,5],[3,4]] engine=[[3,5],[3,4]] equal=true"
+    },
+    {
+      "test": "M2 e7->e5 (black, drag) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=2 (expected >= 2); last: [DEBUG] 2026-11-23T23:18:14.735Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 1:4 to= 3:4"
+    },
+    {
+      "test": "S2 board SYNC after move (both pages == expected server board e7->e5)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Your turn\" B=\"Opponent's turn\""
+    },
+    {
+      "test": "M2 en-passant indicator on e4 (server 4,3) present on BOTH pages",
+      "status": "PASS",
+      "detail": "white bit=64 black bit=64 (expected 64)"
+    },
+    {
+      "test": "Hm3-white highlights on select(6,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[4,6],[5,5],[7,5]] engine=[[4,6],[5,5],[7,5]] equal=true"
+    },
+    {
+      "test": "M3 g1->h3 (white, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=3 (expected >= 3); last: [DEBUG] 2026-11-23T23:18:15.055Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:6 to= 5:7"
+    },
+    {
+      "test": "S3 board SYNC after move (both pages == expected server board g1->h3)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "Hm4-black highlights on select(6,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[7,5],[5,5]] engine=[[7,5],[5,5]] equal=true"
+    },
+    {
+      "test": "M4 b8->c6 (black, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=4 (expected >= 4); last: [DEBUG] 2026-11-23T23:18:15.366Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 0:1 to= 2:2"
+    },
+    {
+      "test": "S4 board SYNC after move (both pages == expected server board b8->c6)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Your turn\" B=\"Opponent's turn\""
+    },
+    {
+      "test": "Hm5-white highlights on select(5,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[0,2],[1,3],[2,4],[3,5],[4,6]] engine=[[0,2],[1,3],[2,4],[3,5],[4,6]] equal=true"
+    },
+    {
+      "test": "M5 f1->c4 (white, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=5 (expected >= 5); last: [DEBUG] 2026-11-23T23:18:15.693Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:5 to= 4:2"
+    },
+    {
+      "test": "S5 board SYNC after move (both pages == expected server board f1->c4)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "Hm6-black highlights on select(2,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[7,2],[6,3],[5,4],[4,5],[3,6]] engine=[[7,2],[6,3],[5,4],[4,5],[3,6]] equal=true"
+    },
+    {
+      "test": "M6 f8->e7 (black, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=6 (expected >= 6); last: [DEBUG] 2026-11-23T23:18:15.993Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 0:5 to= 1:4"
+    },
+    {
+      "test": "S6 board SYNC after move (both pages == expected server board f8->e7)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Your turn\" B=\"Opponent's turn\""
+    },
+    {
+      "test": "Hcastling-white highlights on select(4,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[4,6],[5,7],[6,7]] engine=[[4,6],[5,7],[6,7]] equal=true"
+    },
+    {
+      "test": "H-Castle king highlights include O-O target (g1) before O-O",
+      "status": "PASS",
+      "detail": "highlights=[[4,6],[5,7],[6,7]] contains (6,7): true"
+    },
+    {
+      "test": "M7 e1(O-O)->g1 (white, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=7 (expected >= 7); last: [DEBUG] 2026-11-23T23:18:16.332Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:4 to= 7:6"
+    },
+    {
+      "test": "S7 board SYNC after move (both pages == expected server board e1(O-O)->g1)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "Hm8-black highlights on select(1,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[2,5],[0,5]] engine=[[2,5],[0,5]] equal=true"
+    },
+    {
+      "test": "M8 g8->f6 (black, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=8 (expected >= 8); last: [DEBUG] 2026-11-23T23:18:16.666Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 0:6 to= 2:5"
+    },
+    {
+      "test": "S8 board SYNC after move (both pages == expected server board g8->f6)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Your turn\" B=\"Opponent's turn\""
+    },
+    {
+      "test": "Hm9-white highlights on select(3,7) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[4,6],[4,7],[5,5],[6,4],[7,3]] engine=[[4,6],[4,7],[5,5],[6,4],[7,3]] equal=true"
+    },
+    {
+      "test": "M9 d1->h5 (white, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=9 (expected >= 9); last: [DEBUG] 2026-11-23T23:18:16.986Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:3 to= 3:7"
+    },
+    {
+      "test": "S9 board SYNC after move (both pages == expected server board d1->h5)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "Hm10-black highlights on select(7,6) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[7,5],[7,4]] engine=[[7,5],[7,4]] equal=true"
+    },
+    {
+      "test": "M10 a7->a6 (black, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=10 (expected >= 10); last: [DEBUG] 2026-11-23T23:18:17.282Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 1:0 to= 2:0"
+    },
+    {
+      "test": "S10 board SYNC after move (both pages == expected server board a7->a6)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Your turn\" B=\"Opponent's turn\""
+    },
+    {
+      "test": "Hm11-white highlights on select(7,3) == genLegalMoves (in-page)",
+      "status": "PASS",
+      "detail": "highlights=[[3,7],[4,3],[4,6],[5,1],[5,3],[5,5],[6,2],[6,3],[6,4],[7,1],[7,2],[7,4]] engine=[[3,7],[4,3],[4,6],[5,1],[5,3],[5,5],[6,2],[6,3],[6,4],[7,1],[7,2],[7,4]] equal=true"
+    },
+    {
+      "test": "M11 h5->f7 (white, click) — server \"move: APPLIED\"",
+      "status": "PASS",
+      "detail": "appliedLines=11 (expected >= 11); last: [DEBUG] 2026-11-23T23:18:17.589Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 3:7 to= 1:5"
+    },
+    {
+      "test": "S11 board SYNC after move (both pages == expected server board h5->f7)",
+      "status": "PASS",
+      "detail": "whiteOk=true blackOk=true agree=true; statuses: W=\"Check Mate you Won! 🎉\" B=\"Check Mate you lost! 😢\""
+    },
+    {
+      "test": "M11 checkmate delivered to BOTH pages",
+      "status": "PASS",
+      "detail": "white=\"Check Mate you Won! 🎉\" black=\"Check Mate you lost! 😢\""
+    },
+    {
+      "test": "M11 check indicator on the black king (both pages, at mate)",
+      "status": "PASS",
+      "detail": "white bit=32 black bit=32 (expected 32)"
+    },
+    {
+      "test": "A1 lobby restore-on-load: fresh load with a valid session cookie shows the logged-in state (GET /api/me 200)",
+      "status": "PASS",
+      "detail": "user=restore_tfzoyl; form hidden, [Вход]/[Регистрация] hidden (contract 36), Кабинет/Выход visible, success line shows the username"
+    },
+    {
+      "test": "X1 contract 36: two users registered (inviter + invitee) for the users-directory flow",
+      "status": "PASS",
+      "detail": "u1=u1_4d84yc, invitee=invitee_4d84yc, u3=u3_4d84yc (all registered, Elo 1500, 0 games)"
+    },
+    {
+      "test": "X2 /users public directory: guest sees the table; /api/users/stats lists all three users (elo 1500, 0 games) in elo-desc/name-asc order",
+      "status": "PASS",
+      "detail": "GET /api/users/stats (no auth) status=200: users with elo 1500 / 0 games incl. all three fresh users: true; count=4; page row order [\"invitee_4d84yc\",\"restore_tfzoyl\",\"u1_4d84yc\",\"u3_4d84yc\"] (want invitee<u1<u3): true"
+    },
+    {
+      "test": "X3 /users lists the invitee with Elo 1500 and 0 games (row not marked self for the inviter)",
+      "status": "PASS",
+      "detail": "invitee row present post-goto (found=true); cells=[\"invitee_4d84yc\",\"1500\",\"0\"], self=false (want name/1500/0, self=false)"
+    },
+    {
+      "test": "X4 right-click on a users row opens the invite menu with method choice (Классика / Рапид)",
+      "status": "PASS",
+      "detail": "menu head=\"Пригласить invitee_4d84yc:\" items=[\"Пригласить\",\"Классика\",\"Рапид\"]"
+    },
+    {
+      "test": "X5 users-page invite: «Рапид» chosen -> invite:create {method:\"rapid\"} -> success toast + server OK line",
+      "status": "PASS",
+      "detail": "toast=\"null\"; navigated=qopkvdni; server line=[DEBUG] 2026-11-23T23:18:24.103Z invite:create: OK from= u1_4d84yc to= invitee_4d84yc matchId= qopkvdni; invites.json record method=rapid matchId=qopkvdni: true"
+    },
+    {
+      "test": "X6 invitee lobby shows the invite row: inviter name, Elo 1500, method «Рапид», [Принять] -> /game?matchId",
+      "status": "PASS",
+      "detail": "row=\"u1_4d84yc (Elo 1500) — метод: РапидПринять\"; accept=</game?matchId=qopkvdni> Принять"
+    },
+    {
+      "test": "X7 invitee accepts the invite: joins the match, u1 joins, startGame delivered to both",
+      "status": "PASS",
+      "detail": "invitee=\"Playing as black\" u1=\"Playing as white\" (invite-bound match qopkvdni)"
+    },
+    {
+      "test": "X8 game page: method select ENABLED with options Классика(standard) / Рапид(rapid)",
+      "status": "PASS",
+      "detail": "{\"disabled\":false,\"value\":\"standard\",\"opts\":[{\"value\":\"standard\",\"label\":\"Классика\"},{\"value\":\"rapid\",\"label\":\"Рапид\"}]}"
+    },
+    {
+      "test": "X9 fresh logged-in visitor: same match page, method select enabled (2 options) before any redirect",
+      "status": "PASS",
+      "detail": "probe (sessionStorage, survives redirect) = {\"disabled\":false,\"value\":\"standard\",\"count\":2}"
+    },
+    {
+      "test": "X10 public profiles list the finished game: opponent, per-view result (Победа/Поражение), method «Рапид»",
+      "status": "PASS",
+      "detail": "invitee(seated black) end=\"Check Mate you lost! 😢\" u1 end=\"Check Mate you Won! 🎉\"; invitee profile cells=[\"2026-11-23T23:18:33.318Z\",\"u1_4d84yc\",\"Поражение\",\"Рапид\"]; u1 profile cells=[\"2026-11-23T23:18:33.318Z\",\"invitee_4d84yc\",\"Победа\",\"Рапид\"]"
+    },
+    {
+      "test": "37D registered-pair game: drag-on-own-square cancels silently (no server REJECTED, no shake) + white capture strip shows a board-derived black (.cap-dark) glyph, no light",
+      "status": "PASS",
+      "detail": "halfA return-drop e2->e2 on u1(white, invite match qopkvdni): new REJECTED lines=0 (want 0, silent completeDrag) sawShake=false (want false, no 'shake' class within 500ms) e2 piece=1 (want 1=white pawn) inviteRejTotal=0 rejLine=NONE | halfB white capture strip (#captured-white for the white viewer, the board-derived renderCapturedPieces output) at first black-capture (6.Qxf7# f7 pawn): DOM 1 cap-d"
+    },
+    {
+      "test": "X11 /api/users/stats after the game: both users games=1, winner elo>1500, loser elo<1500",
+      "status": "PASS",
+      "detail": "u1 elo=1516 games=1; invitee elo=1484 games=1 (invitee seated black)"
+    },
+    {
+      "test": "X12 /user?name=<unknown> -> 404 with the Russian «Пользователь не найден»",
+      "status": "PASS",
+      "detail": "status=404; contains «Пользователь не найден»: true"
+    },
+    {
+      "test": "C-err no JS console/page errors on white or black page",
+      "status": "PASS",
+      "detail": "white errors=[]; black errors=[]; lobby(restore) errors=[]"
+    },
+    {
+      "test": "C-err36 no JS console/page errors on the contract-36 pages (users, invitee lobby, game, profiles)",
+      "status": "PASS",
+      "detail": "users/invitee/game/profile errors=[]"
+    }
+  ],
+  "invite36": {
+    "u1": "u1_4d84yc",
+    "invitee": "invitee_4d84yc",
+    "method": "rapid",
+    "matchId": "qopkvdni",
+    "acceptHref": "/game?matchId=qopkvdni"
+  },
+  "serverLog": [
+    "[DEBUG] 2026-11-23T23:18:13.237Z move: REJECTED reason=illegal matchId= 3vntqfuy turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
+    "[DEBUG] 2026-11-23T23:18:13.541Z move: REJECTED reason=illegal matchId= 3vntqfuy turnState= 0 mover-is-p1= true from= 6:4 to= 3:4",
+    "[DEBUG] 2026-11-23T23:18:14.187Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 6:4 to= 4:4",
+    "[DEBUG] 2026-11-23T23:18:14.735Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 1:4 to= 3:4",
+    "[DEBUG] 2026-11-23T23:18:15.055Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:6 to= 5:7",
+    "[DEBUG] 2026-11-23T23:18:15.366Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 0:1 to= 2:2",
+    "[DEBUG] 2026-11-23T23:18:15.693Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:5 to= 4:2",
+    "[DEBUG] 2026-11-23T23:18:15.993Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 0:5 to= 1:4",
+    "[DEBUG] 2026-11-23T23:18:16.332Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:4 to= 7:6",
+    "[DEBUG] 2026-11-23T23:18:16.666Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 0:6 to= 2:5",
+    "[DEBUG] 2026-11-23T23:18:16.986Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 7:3 to= 3:7",
+    "[DEBUG] 2026-11-23T23:18:17.282Z move: APPLIED matchId= 3vntqfuy turn= 1 from= 1:0 to= 2:0",
+    "[DEBUG] 2026-11-23T23:18:17.589Z move: APPLIED matchId= 3vntqfuy turn= 0 from= 3:7 to= 1:5",
+    "[DEBUG] 2026-11-23T23:18:31.595Z move: APPLIED matchId= qopkvdni turn= 0 from= 6:4 to= 4:4",
+    "[DEBUG] 2026-11-23T23:18:31.851Z move: APPLIED matchId= qopkvdni turn= 1 from= 1:4 to= 3:4",
+    "[DEBUG] 2026-11-23T23:18:32.019Z move: APPLIED matchId= qopkvdni turn= 0 from= 7:6 to= 5:7",
+    "[DEBUG] 2026-11-23T23:18:32.199Z move: APPLIED matchId= qopkvdni turn= 1 from= 0:1 to= 2:2",
+    "[DEBUG] 2026-11-23T23:18:32.346Z move: APPLIED matchId= qopkvdni turn= 0 from= 7:5 to= 4:2",
+    "[DEBUG] 2026-11-23T23:18:32.457Z move: APPLIED matchId= qopkvdni turn= 1 from= 0:5 to= 1:4",
+    "[DEBUG] 2026-11-23T23:18:32.607Z move: APPLIED matchId= qopkvdni turn= 0 from= 7:4 to= 7:6",
+    "[DEBUG] 2026-11-23T23:18:32.731Z move: APPLIED matchId= qopkvdni turn= 1 from= 0:6 to= 2:5",
+    "[DEBUG] 2026-11-23T23:18:32.919Z move: APPLIED matchId= qopkvdni turn= 0 from= 7:3 to= 3:7",
+    "[DEBUG] 2026-11-23T23:18:33.123Z move: APPLIED matchId= qopkvdni turn= 1 from= 1:0 to= 2:0",
+    "[DEBUG] 2026-11-23T23:18:33.311Z move: APPLIED matchId= qopkvdni turn= 0 from= 3:7 to= 1:5"
+  ]
+}

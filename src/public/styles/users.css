@@ -1,0 +1,114 @@
+/* Users directory (contract 36c, on shared tokens.css + account.css chrome).
+   Loaded AFTER account.css. Adds only what /users has beyond the account
+   page: the hint line, the directory-row states (hover / own row), the
+   invite context menu, and the toast wiring (the toast component itself
+   lives in tokens.css). Class names are the contract
+   (.user-row, .user-self, .user-menu, .user-menu-item, .user-menu-method,
+   .user-menu-invite). */
+
+/* Short helper line under the title: tells the visitor how to invite. */
+.directory-hint {
+  margin: calc(-1 * var(--sp-4)) 0 var(--sp-4);
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* Numeric columns of the directory align with the account table convention. */
+.users-table td:nth-child(2),
+.users-table td:nth-child(3) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.users-table th:nth-child(2),
+.users-table th:nth-child(3) {
+  text-align: right;
+}
+
+/* The username cell links to the public profile. */
+.users-table .user-row td:first-child a {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.users-table .user-row td:first-child a:hover {
+  color: var(--accent);
+}
+
+/* Directory rows: clickable (profile link). */
+.games-table .user-row {
+  cursor: pointer;
+}
+
+.games-table .user-row:hover td {
+  background: var(--line);
+}
+
+/* Own row (the logged-in user): a soft accent wash + a "(вы)" marker is set
+   by users.js text; never hide the row. */
+.games-table .user-self td {
+  background: var(--accent-soft);
+  border-bottom-color: transparent;
+}
+
+.games-table .user-self:hover td {
+  background: var(--accent-soft);
+}
+
+/* ---- Invite context menu (created by users.js, anchored near the row) ---- */
+.user-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: 6px;
+}
+
+.user-menu-head {
+  padding: 6px 10px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.user-menu-item {
+  padding: 10px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.user-menu-item:hover {
+  background: var(--card-2);
+}
+
+/* The top «Пригласить» entry is a heading-like row, not a selectable action. */
+.user-menu-invite {
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+/* Method choices sit under the «Пригласить» heading, indented. */
+.user-menu-method {
+  margin-left: 12px;
+  color: var(--text-dim);
+}
+
+.user-menu-method:hover {
+  color: var(--text);
+}
+
+/* ---- Toast: the shared component from tokens.css; nothing page-specific. ---- */

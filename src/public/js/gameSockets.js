@@ -737,6 +737,140 @@ socket.on('repetitionWarning', (data) => {
   document.getElementById('repetitionWarningModal').style.display = 'block';
 });
 
+// ============================
+// Contract 32 — game link + invite (client scope)
+// ============================
+// Login state: the same sessionID-cookie check the page already uses (sendCookie)
+// to decide authenticated vs guest. Invite UI is hidden for guests.
+function guestOnGamePage() {
+  return readCookie('sessionID') == null;
+}
+
+(function initInviteUI() {
+  const inviteBtn = document.getElementById('btn-invite');
+  if (inviteBtn && guestOnGamePage()) inviteBtn.style.display = 'none';
+})();
+
+// --- «Ссылка на игру» — emit private-match, wait for the echo id, open the
+// modal with location.origin + '/game?matchId=' + id + a copy button.
+// Works for guests AND logged-in users (the server event is unchanged).
+const btnGameLink = document.getElementById('btn-game-link');
+const gameLinkModal = document.getElementById('gameLinkModal');
+const gameLinkText = document.getElementById('game-link-text');
+
+function showGameLink(id) {
+  if (!id) return;
+  if (!gameLinkModal || !gameLinkText) return;
+  const url = window.location.origin + '/game?matchId=' + id;
+  gameLinkText.textContent = url;
+  gameLinkModal.style.display = 'flex';
+}
+
+// Contract 36 §1: landing on /game?matchId=<id>#link (the lobby [Играть] flow)
+// auto-opens the link modal ONCE — after seating, so the modal sits on top of
+// the live board. Cleared from the URL so a reload does not re-open it.
+let __linkModalPending = (location.hash || '') === '#link';
+if (__linkModalPending) {
+  history.replaceState(null, '', location.pathname + location.search);
+  // Integration fix (contract 36 smoke): a SOLO host arriving from the lobby
+  // [Играть] flow has no second player yet — 'startGame'/'reconnected' never
+  // fire, so the modal used to stay closed and the link could not be shared.
+  // The matchId is already in the URL, so open immediately.
+  const __pendingId = new URLSearchParams(location.search).get('matchId');
+  if (__pendingId) { __linkModalPending = false; showGameLink(__pendingId); }
+}
+
+// The server echoes the generated id back on the SAME socket that requested it.
+socket.on('private-match', matchId => {
+  showGameLink(matchId);
+});
+
+// Both seating paths (first-time 'startGame' and reload 'reconnected') open the
+// pending link modal exactly once — the page's own "I am seated" signals.
+function openLinkModalIfPending() {
+  if (!__linkModalPending) return;
+  __linkModalPending = false;
+  if (matchId) showGameLink(matchId);
+}
+socket.on('startGame', () => openLinkModalIfPending());
+socket.on('reconnected', () => openLinkModalIfPending());
+
+if (btnGameLink) {
+  btnGameLink.addEventListener('click', () => {
+    socket.emit('private-match', 1); // argument ignored by server; it generates the id
+  });
+}
+
+const btnGameLinkClose = document.getElementById('btn-game-link-close');
+if (btnGameLinkClose) {
+  btnGameLinkClose.addEventListener('click', () => { if (gameLinkModal) gameLinkModal.style.display = 'none'; });
+}
+
+const btnGameLinkCopy = document.getElementById('btn-game-link-copy');
+if (btnGameLinkCopy) {
+  btnGameLinkCopy.addEventListener('click', () => {
+    if (!gameLinkText) return;
+    const url = gameLinkText.textContent;
+    const done = () => showToast('Ссылка скопирована');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, done);
+    } else {
+      // Fallback (non-secure context / older browsers)
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        done();
+      } catch (e) { showToast('Не удалось скопировать'); }
+    }
+  });
+}
+
+// --- «Пригласить игрока» — registered only: prompt a username, emit
+// invite:create, on invite:created navigate to /game?matchId=<id>, on
+// invite:failed show the Russian reason.
+const btnInvite = document.getElementById('btn-invite');
+
+const INVITE_FAIL_TEXT = {
+  'auth': 'Приглашение — только для зарегистрированных',
+  'no-user': 'Нет такого пользователя',
+  'self': 'Нельзя пригласить самого себя',
+  'method-na': 'Неизвестный метод — выберите «Классика» или «Рапид»',
+};
+
+// Contract 36 §3: the method select is ENABLED (standard/rapid); the invite
+// carries the selected value. The server is authoritative (it rejects anything
+// that is not 'standard'|'rapid' with method-na).
+function selectedMethod() {
+  const sel = document.getElementById('method-select');
+  if (!sel) return 'standard';
+  const v = sel.value;
+  return (v === 'rapid') ? 'rapid' : 'standard';
+}
+
+if (btnInvite) {
+  btnInvite.addEventListener('click', () => {
+    if (gameIsOver) return;
+    const target = (prompt('Имя пользователя для приглашения:') || '').trim();
+    if (!target) return;
+    socket.emit('invite:create', { targetUsername: target, method: selectedMethod() });
+  });
+}
+
+socket.on('invite:created', (data) => {
+  if (data && data.matchId) {
+    window.location.href = '/game?matchId=' + encodeURIComponent(data.matchId);
+  }
+});
+
+socket.on('invite:failed', (data) => {
+  const reason = (data && data.reason) || '';
+  showToast(INVITE_FAIL_TEXT[reason] || 'Не удалось отправить приглашение');
+});
+
 // --- Socket disconnect / error — unlock move validation ---
 socket.on('disconnect', () => {
   is_being_validated = false;

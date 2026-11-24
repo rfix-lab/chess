@@ -1,9 +1,43 @@
 import { io } from 'socket.io-client';
 import fs from 'fs';
+import path from 'path';
 import bcrypt from 'bcrypt';
 import { loadUsersFile, authenticateUser, validateSession, saveUsersFile, loadSessionsFile, saveSessionsFile, attachSessionsToUsers, USERS_CSV } from './src/lib/auth.js';
+import { loadGames, GAMES_CSV, GAMES_CSV_HEADER, GAMES_CSV_HEADER_LEGACY } from './src/lib/games.js';
+import { loadInvitesFile } from './src/lib/invites.js';
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Poll `cond` every 50ms until it returns a truthy value or `timeoutMs` passes.
+// T31: more robust than a fixed sleep under the parallel-load environment the
+// runner shares with the concurrent e2e harness (run.mjs note: load flakes).
+async function waitFor(cond, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const v = cond();
+    if (v) return v;
+    if (Date.now() > end) return null;
+    await sleep(50);
+  }
+}
+
+// T31: signin with a retry — the runner shares the event loop / network with the
+// concurrent e2e harness, so a single bcrypt round-trip can exceed a tight timeout
+// under load. Retry up to 3 attempts with a 4s budget each before giving up.
+async function signinWithRetry(socket, username, password) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const s = await new Promise(r => {
+      const done = (v) => { socket.removeListener('signin', on); r(v); };
+      const on = (ok, sid) => { if (ok === 1) done(sid); };
+      socket.once('signin', on);
+      socket.emit('signin', { username, password });
+      setTimeout(() => done(null), 4000);
+    });
+    if (s) return s;
+    await sleep(150);
+  }
+  return null;
+}
 
 async function test() {
   console.log('=== Chess Integration Tests ===\n');
@@ -543,16 +577,32 @@ async function test() {
 
   if (e1s) e1.emit('auth', e1s, null);
   if (e2s) e2.emit('auth', e2s, null);
-  await sleep(500);
+  // T33 hardening: the old code slept 500 ms then checked em1/em2 — under the
+  // parallel-load runner the startGame emission can lag that much, leaving
+  // em1 null and cascading failures (m1=null) into the T31 CSV rows. Wait for
+  // both seats to report the match id instead.
+  // both sockets must report their SEAT (color), not just the match id:
+  // startGame(c, id) for the two sockets can arrive at different times,
+  // and the move sequence below is routed by color (e1Color) — a null
+  // color routes the first move to the wrong socket, it gets rejected
+  // (not-movers-socket) and the game ends up pre-start.
+  await waitFor(() => em1 !== null && em2 !== null && em1 === em2 && e1Color !== null && e2Color !== null, 5000);
 
   if (em1 !== null && em1 === em2) {
-    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
+    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#. Drive the moves from the
+    // socket that is actually WHITE (e1Color) — the fixed i%2->e1/e2
+    // alternation assumed e1 was white, which is not guaranteed when the two
+    // sockets seat in the opposite order (the not-movers-socket rejection seen
+    // in the load-flake trace).
+    const wSock = e1Color === 0 ? e1 : e2;
+    const bSock = e1Color === 0 ? e2 : e1;
     const seq = [[4,6,4,4],[4,1,4,3],[5,7,2,4],[1,0,2,2],[3,7,7,3],[6,0,5,2],[7,3,5,1]];
     for (let i = 0; i < seq.length; i++) {
       const [fx, fy, tx, ty] = seq[i];
-      (i % 2 === 0 ? e1 : e2).emit('move', em1, { x: fx, y: fy }, { x: tx, y: ty });
+      (i % 2 === 0 ? wSock : bSock).emit('move', em1, { x: fx, y: fy }, { x: tx, y: ty });
       await sleep(200);
     }
+    await waitFor(() => e1End && e2End, 5000);
     if (e1End && e2End) pass('F2: rated match ended (checkmate)');
     else fail('F2: rated match ended', `e1=${JSON.stringify(e1End)} e2=${JSON.stringify(e2End)}`);
   } else {
@@ -602,24 +652,35 @@ async function test() {
   ]);
 
   let rMatch = null, rEnd1 = null, rEnd2 = null, rReplay1 = null, rReplay2 = null;
-  r1.on('startGame', (c, m) => { if (rMatch === null) rMatch = m; });
-  r2.on('startGame', (c, m) => { if (rMatch === null) rMatch = m; });
+  let r1Color = null, r2Color = null;
+  r1.on('startGame', (c, m) => { r1Color = c; if (rMatch === null) rMatch = m; });
+  r2.on('startGame', (c, m) => { r2Color = c; if (rMatch === null) rMatch = m; });
   r1.on('gameEnd', d => { rEnd1 = d; });
   r2.on('gameEnd', d => { rEnd2 = d; });
   r1.on('replay', m => { rReplay1 = m; });
   r2.on('replay', m => { rReplay2 = m; });
   r1.emit('auth', null, null);
   r2.emit('auth', null, null);
-  // hardened 500 -> 1200 (same load-flake class as the guest seating wait:
-  // parallel headless e2e inflates the seat round-trip -> rMatch stays null).
-  await sleep(1200);
+  // T33 hardening: replace the fixed 1200 ms sleep (itself a load-flake
+  // mitigation — parallel headless e2e inflates the seat round-trip and
+  // rMatch stayed null) with a waitFor on the seating itself: deterministic
+  // when the event arrives early, and tolerant of a slow server loop when it
+  // does not.
+  // both sockets must report their SEAT: the mate is driven by socket
+  // alternation, so if r1 is actually BLACK (seating race) the first
+  // 'move' on r1 would be rejected and the game would never end.
+  await waitFor(() => rMatch !== null && r1Color !== null && r2Color !== null, 5000);
 
   if (rMatch !== null) {
-    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#
+    // Scholar's mate: e4 e5 Bc4 Nc6 Qh5 Nf6 Qxf7#. Drive the moves from the
+    // socket that is actually WHITE (the replay content is white-first either
+    // way, so the per-client assertions below are unaffected by who is who).
+    const whiteSock = r1Color === 0 ? r1 : r2;
+    const blackSock = r1Color === 0 ? r2 : r1;
     const seq = [[4,6,4,4],[4,1,4,3],[5,7,2,4],[1,0,2,2],[3,7,7,3],[6,0,5,2],[7,3,5,1]];
     for (let i = 0; i < seq.length; i++) {
       const [fx, fy, tx, ty] = seq[i];
-      (i % 2 === 0 ? r1 : r2).emit('move', rMatch, { x: fx, y: fy }, { x: tx, y: ty });
+      (i % 2 === 0 ? whiteSock : blackSock).emit('move', rMatch, { x: fx, y: fy }, { x: tx, y: ty });
       await sleep(200);
     }
     if (rEnd1 && rEnd2 && rEnd1.reason === 'checkmate' && rEnd2.reason === 'checkmate')
@@ -720,11 +781,19 @@ async function test() {
   b3b.on('gameEnd', d => { b3EndB = d; });
   b3a.emit('auth', null, null);
   b3b.emit('auth', null, null);
-  await sleep(500);
+  // T33 hardening: wait for BOTH sockets to report their color, not just the
+  // first startGame (b3Match is set by the FIRST echo, so it can be non-null
+  // while the server has not yet seated the OTHER socket — the disconnect
+  // below would then hit a socket whose data.user is still null and the
+  // handler returns early, emitting no gameEnd: the flake).
+  await waitFor(() => b3Match !== null && b3aColor !== null && b3bColor !== null, 5000);
   if (b3Match !== null) {
     b3a.disconnect();
-    await sleep(300);
-    const winnerEnd = b3aColor === 0 ? b3EndB : b3EndA; // b3b stayed connected
+    // The winner is ALWAYS the socket that stayed connected (b3b) — the
+    // pre-start path ends the game for the survivor regardless of color, so
+    // no color-keyed selection is needed (the old ternary was also inverted).
+    await waitFor(() => b3EndB !== null, 3000);
+    const winnerEnd = b3EndB; // b3b stayed connected
     if (winnerEnd && winnerEnd.reason === 'opponent_disconnect' && winnerEnd.result === 'win')
       pass('B3: pre-start disconnect → opponent gets gameEnd(opponent_disconnect, win) immediately');
     else fail('B3: pre-start disconnect → immediate gameEnd', `winnerEnd=${JSON.stringify(winnerEnd)}`);
@@ -740,7 +809,11 @@ async function test() {
     b3c.on('reconnected', () => { b3cRecon = true; });
     b3c.on('startGame', () => { b3cStart = true; });
     b3c.emit('reconnect', { gameId: b3Match, color: b3bColor, sessionID: null, prevSocketId: null });
-    await sleep(300);
+    // T33 hardening: wait for the reconnect OUTCOME (gameNotFound / reconnected
+    // / startGame) instead of a fixed 300 ms — this is a negative assertion
+    // (expecting gameNotFound), so we wait for the FIRST emitted outcome; if
+    // the wrong one arrives first the assertion below still catches it.
+    await waitFor(() => b3cNotFound || b3cRecon || b3cStart, 3000);
     if (b3cNotFound && !b3cRecon && !b3cStart)
       pass('B3: dead pre-start match removed (reconnect → gameNotFound, no ghost re-seat)');
     else fail('B3: dead pre-start match removed', `b3Match=${b3Match} notFound=${b3cNotFound} recon=${b3cRecon} start=${b3cStart}`);
@@ -762,25 +835,49 @@ async function test() {
     Promise.race([new Promise(r => b4w.on('connect', r)), sleep(3000)]),
     Promise.race([new Promise(r => b4b.on('connect', r)), sleep(3000)])
   ]);
-  let b4Match = null, b4wColor = null, b4bColor = null, b4wValid = 0, b4bValid = 0;
+  let b4Match = null, b4wColor = null, b4bColor = null, b4wValid = 0, b4bValid = 0, b4MoveApplied = false;
   b4w.on('startGame', (c, m) => { b4wColor = c; if (b4Match === null) b4Match = m; });
   b4b.on('startGame', (c, m) => { b4bColor = c; if (b4Match === null) b4Match = m; });
-  b4w.on('validated', () => { b4wValid++; });
-  b4b.on('validated', () => { b4bValid++; });
+  b4w.on('validated', (board, turn, extra) => { b4wValid++; if (!(extra && extra.rejected)) b4MoveApplied = true; });
+  b4b.on('validated', (board, turn, extra) => { b4bValid++; if (!(extra && extra.rejected)) b4MoveApplied = true; });
   b4w.emit('auth', null, null);
   b4b.emit('auth', null, null);
-  await sleep(500);
+  // T33 hardening: wait for the server to seat the pair — BOTH sockets must
+  // report their color, not just one (b4Match is set by the FIRST startGame
+  // echo, so b4Match!==null alone is satisfied before the other seat reports
+  // its color; the move below routes by color, and a null color rejects it
+  // not-movers-socket, leaving moveHistory=0 → the F5 pre-start gate kills
+  // the match before the reconnect (the gameNotFound flake).)
+  await waitFor(() => b4Match !== null && b4wColor !== null && b4bColor !== null, 5000);
+  // The two guest auth packets are two separate connections: under load the
+  // server can seat them in the OPPOSITE order (b4b as white, b4w as black).
+  // The row must therefore key on the socket the server actually gave color 0,
+  // never on the b4w/b4wColor variables — that is the flake's root cause:
+  // the old code told the white socket to play the BLACK move (illegal →
+  // rejected → moveHistory stays 0 → the F5 disconnect reads it as pre-start
+  // and kills the match before the reconnect, gameNotFound). The board is
+  // fixed-orientation (white pawns at y=6), so whichever socket is white
+  // always plays e2-e4, and the reconnect must carry that socket's color (0).
+  const wSock = b4wColor === 0 ? b4w : b4b;
+  const oppSock = b4wColor === 0 ? b4b : b4w;
   if (b4Match !== null) {
-    // One move by white (e2-e4) so moveHistory.length = 1.
-    const wMoveFirst = b4wColor === 0;
-    if (wMoveFirst) {
-      b4w.emit('move', b4Match, { x: 4, y: 6 }, { x: 4, y: 4 });
-    } else {
-      b4w.emit('move', b4Match, { x: 4, y: 1 }, { x: 4, y: 3 });
-    }
+    // One move by the socket that is actually WHITE (e2-e4) so
+    // moveHistory.length = 1, then the white socket disconnects (F5) and a
+    // fresh socket reconnects as the same white player.
+    // T33 hardening: wait for the move to be APPLIED (a 'validated' echo on
+    // the mover) instead of a blind 300 ms — under the parallel-load runner
+    // the move event can lag and the disconnect used to race it (F5 flakes:
+    // the pre-start gate saw moveHistory.length=0).
+    wSock.emit('move', b4Match, { x: 4, y: 6 }, { x: 4, y: 4 });
+    await waitFor(() => b4MoveApplied, 3000);
+    // T33 hardening: the echo proves the client RECEIVED the applied-move
+    // acknowledgement; on the server the disconnect handler can still run
+    // before the move handler's bookkeeping settles, so a short settle after
+    // the echo closes that F5 gap (endMatch would otherwise read
+    // moveHistory.length===0 and remove the match pre-reconnect).
     await sleep(300);
-    const oldWId = b4w.id; // socket.io id BEFORE disconnect (the F5 race case)
-    b4w.disconnect();
+    const oldWId = wSock.id; // socket.io id BEFORE disconnect (the F5 race case)
+    wSock.disconnect();
     await sleep(100);
     // A NEW socket (the reloaded page) reconnects as the same white player,
     // carrying the old socket's id as prevSocketId.
@@ -790,19 +887,25 @@ async function test() {
     b4w2.on('reconnected', (color, gid, boardState, turnState) => { b4Recon = { color, gid, boardState, turnState }; });
     b4w2.on('gameNotFound', () => { b4NotFound = true; });
     b4w2.on('gameEnd', d => { b4W2End = d; });
-    b4w2.emit('reconnect', { gameId: b4Match, color: b4wColor, sessionID: null, prevSocketId: oldWId });
-    await sleep(300);
-    if (!b4NotFound && b4Recon && b4Recon.color === b4wColor && b4Recon.gid === b4Match &&
+    // Reconnect as the same WHITE player: carry the white socket's color (0) —
+    // NOT b4wColor, which is the first-emitting socket's color and may be 1.
+    b4w2.emit('reconnect', { gameId: b4Match, color: 0, sessionID: null, prevSocketId: oldWId });
+    // T33 hardening: wait for an OUTCOME (reconnected or gameNotFound) instead
+    // of a fixed 300 ms — the reconnect round-trip is the slowest event in
+    // this block under load and the row flaked when it lagged the assertion.
+    await waitFor(() => b4Recon !== null || b4NotFound, 3000);
+    if (!b4NotFound && b4Recon && b4Recon.color === 0 && b4Recon.gid === b4Match &&
         Array.isArray(b4Recon.boardState) && b4Recon.boardState.length === 8 &&
         (b4Recon.turnState === 0 || b4Recon.turnState === 1))
       pass('B4: F5 reconnect (prevSocketId=old) → reconnected (not gameNotFound) with board+turnState');
     else fail('B4: F5 reconnect', `notFound=${b4NotFound} recon=${b4Recon && JSON.stringify({ color: b4Recon.color, gid: b4Recon.gid, turn: b4Recon.turnState, rows: b4Recon.boardState && b4Recon.boardState.length })}`);
-    // Black unaffected: the reconnected white did NOT end the game for black.
+    // The opponent (non-reconnected) socket is left alone: the reconnected
+    // white did NOT end the game for them. Clean up whichever socket it is.
     b4w2.disconnect();
+    oppSock.disconnect();
   } else {
     fail('B4: F5 reconnect', 'match null (startGame never arrived)');
   }
-  b4b.disconnect();
 
   // === T-B6: session persistence across a container "restart" ===
   // Simulates exactly what a deploy/restart does: the in-RAM user array is
@@ -882,9 +985,11 @@ async function test() {
     seU2.emit('signup', { username: seU2name, password: 'spw2' });
     seU3.emit('signup', { username: seU3name, password: 'spw3' });
     await sleep(150);
-    const seU1s = await new Promise(r => { seU.once('signin', (ok, s) => r(s)); seU.emit('signin', { username: seU1name, password: 'spw1' }); setTimeout(() => r(null), 3000); });
-    const seU2s = await new Promise(r => { seU2.once('signin', (ok, s) => r(s)); seU2.emit('signin', { username: seU2name, password: 'spw2' }); setTimeout(() => r(null), 3000); });
-    const seU3s = await new Promise(r => { seU3.once('signin', (ok, s) => r(s)); seU3.emit('signin', { username: seU3name, password: 'spw3' }); setTimeout(() => r(null), 3000); });
+    // T31 hardening: the suite runs under parallel load (concurrent e2e harness);
+    // a 3s signin budget flaked here (2026-11-23) — retry helper, 3x4s budgets.
+    const seU1s = await signinWithRetry(seU, seU1name, 'spw1');
+    const seU2s = await signinWithRetry(seU2, seU2name, 'spw2');
+    const seU3s = await signinWithRetry(seU3, seU3name, 'spw3');
     if (!(seU1s && seU2s && seU3s)) fail('T30 seat-elo: signup/signin for all users', `s1=${seU1s} s2=${seU2s} s3=${seU3s}`);
 
     const u1Elos = [];
@@ -1031,6 +1136,751 @@ async function test() {
     }
     sA.disconnect(); sB.disconnect();
   }
+
+  // === T31 (contract 32): user account server — games.csv, invites, /account, /api/me ===
+  // The in-process test server points DATA_DIR at the runner's fresh mkdtemp dir
+  // (same as USERS_CSV), so GAMES_CSV / invites.json land in the TEMP dir —
+  // never the real data/. The F2 block above already ended a reg-vs-reg rated
+  // game, so its games.csv row exists here and is asserted first.
+  {
+    // --- games.csv: the F2 row (reg vs reg, checkmate, both started 1500) ---
+    const gamesAfterF2 = loadGames();
+    const f2w = (e1Color === 0) ? eloU1 : eloU2;
+    const f2l = (e1Color === 0) ? eloU2 : eloU1;
+    const f2Rows = gamesAfterF2.filter(g =>
+      (g.white === f2w && g.black === f2l) || (g.white === f2l && g.black === f2w));
+    const f2Row = f2Rows[0];
+    const finalW = (e1Color === 0) ? a1 : a2;
+    const finalL = (e1Color === 0) ? a2 : a1;
+    if (f2Rows.length === 1 && f2Row && (f2Row.result === 'white-win' || f2Row.result === 'black-win') && f2Row.reason === 'checkmate' && f2Row.white !== '-' && f2Row.black !== '-' && f2Row.ts) {
+      const wIsWhite = (f2Row.white === f2w);
+      const wFinal = wIsWhite ? finalW.elo : finalL.elo;
+      const lFinal = wIsWhite ? finalL.elo : finalW.elo;
+      if (f2Row.whiteEloBefore === 1500 && f2Row.blackEloBefore === 1500 &&
+          f2Row.whiteEloAfter === (wIsWhite ? wFinal : lFinal) &&
+          f2Row.blackEloAfter === (wIsWhite ? lFinal : wFinal))
+        pass('T31: games.csv F2 row — result ' + f2Row.result + ', reason ' + f2Row.reason + ', elo_before 1500/1500, elo_after = final CSV values');
+      else
+        fail('T31: games.csv F2 row elo columns', JSON.stringify(f2Row) + ' finals=' + wFinal + '/' + lFinal);
+    } else {
+      fail('T31: games.csv F2 row', `rows=${JSON.stringify(f2Rows)}`);
+    }
+
+    // --- games.csv: guest-vs-guest game end -> NO row ---
+    const rowsBeforeGG = loadGames().length;
+    const gg1 = io(BASE, { transports: ['websocket'] });
+    const gg2 = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => gg1.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => gg2.on('connect', r)), sleep(3000)])
+    ]);
+    let ggMatch = null, ggEnd1 = null, ggEnd2 = null;
+    gg1.on('startGame', (c, m) => { if (ggMatch === null) ggMatch = m; });
+    gg2.on('startGame', (c, m) => { if (ggMatch === null) ggMatch = m; });
+    gg1.on('gameEnd', d => { ggEnd1 = d; });
+    gg2.on('gameEnd', d => { ggEnd2 = d; });
+    gg1.emit('auth', null, null);
+    gg2.emit('auth', null, null);
+    const ggReady = await waitFor(() => ggMatch !== null, 5000);
+    if (ggReady) {
+      gg1.emit('resign', ggMatch);
+      await waitFor(() => ggEnd1 && ggEnd2, 3000);
+      await sleep(200); // allow the endMatch append to flush
+    }
+    const rowsAfterGG = loadGames().length;
+    if (ggEnd1 && ggEnd2 && rowsAfterGG === rowsBeforeGG)
+      pass('T31: guest-vs-guest game end -> no games.csv row (count ' + rowsBeforeGG + ' unchanged)');
+    else
+      fail('T31: guest-vs-guest no row', `end1=${JSON.stringify(ggEnd1)} rows ${rowsBeforeGG}->${rowsAfterGG}`);
+    gg1.disconnect(); gg2.disconnect();
+
+    // --- games.csv: registered-vs-guest -> ONE row, guest side is '-' ---
+    const rgW = 't31rgw_' + Date.now();
+    const rg1 = io(BASE, { transports: ['websocket'] });
+    const rg2 = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => rg1.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => rg2.on('connect', r)), sleep(3000)])
+    ]);
+    rg1.emit('signup', { username: rgW, password: 'rgpw1' });
+    await sleep(150);
+    const rg1s = await signinWithRetry(rg1, rgW, 'rgpw1');
+    let rgMatch = null, rgColor1 = null, rgEnd1 = null, rgEnd2 = null;
+    rg1.on('startGame', (c, m) => { rgColor1 = c; if (rgMatch === null) rgMatch = m; });
+    rg2.on('startGame', (c, m) => { if (rgMatch === null) rgMatch = m; });
+    rg1.on('gameEnd', d => { rgEnd1 = d; });
+    rg2.on('gameEnd', d => { rgEnd2 = d; });
+    // Inviter-style seating: the registered player's match, registered joins first
+    // (white/host), then the guest joins (open-join private match, no invite).
+    rg1.on('private-match', (id) => { if (rgMatch === null) rgMatch = id; });
+    rg1.emit('private-match', null);
+    await Promise.race([new Promise(r => rg1.once('private-match', r)), sleep(3000)]);
+    // Deterministic seating order: the server processes socket events in queue
+    // order — the registered player is queued first and seats white, the guest
+    // second and seats black (open-join private match, no invite). A callback-
+    //triggered second emit would race the queue, so both are emitted here, back
+    // to back, right after the echo.
+    if (rgMatch !== null) {
+      rg1.emit('auth', rg1s, rgMatch);
+      rg2.emit('auth', null, rgMatch);
+    }
+    // Wait until BOTH are seated (startGame delivered to rg1 — rgColor1 set) and
+    // the game has not ended yet. A null rg1s here means signin timed out under
+    // load — fail loudly instead of silently producing a guest-vs-guest game.
+    if (!rg1s) fail('T31 rg: signin timed out under load', 'rg1s=null');
+    await waitFor(() => rgColor1 !== null && rgEnd1 === null, 5000);
+    if (rgMatch !== null && rgColor1 !== null && rgEnd1 === null) {
+      // the GUEST (color 1) resigns -> reason resign, result white-win
+      const rgGuest = rgColor1 === 0 ? rg2 : rg1;
+      rgGuest.emit('resign', rgMatch);
+      await waitFor(() => rgEnd1 && rgEnd2, 3000);
+      await sleep(300); // allow the endMatch append to flush
+    }
+    const rgRows = loadGames().filter(g => g.white === rgW || g.black === rgW);
+    const rgRow = rgRows[0];
+    if (rgRows.length === 1 && rgRow && (rgRow.white === rgW) === (rgColor1 === 0) &&
+        rgRow.result === 'white-win' && rgRow.reason === 'resign' &&
+        rgRow.whiteEloBefore === 1500 && rgRow.whiteEloAfter === 1500 &&
+        rgRow.black === null && rgRow.blackEloBefore === 0 && rgRow.blackEloAfter === 0)
+      pass('T31: games.csv registered-vs-guest — one row, guest = "-", elo unchanged (1500/0)');
+    else
+      fail('T31: games.csv registered-vs-guest', `rows=${JSON.stringify(rgRows)} color1=${rgColor1} end1=${JSON.stringify(rgEnd1)}`);
+    rg1.disconnect(); rg2.disconnect();
+
+    // --- invites: setup (3 users + a guest socket) ---
+    const ivA = 't31ivA_' + Date.now(), ivB = 't31ivB_' + Date.now(), ivC = 't31ivC_' + Date.now();
+    const ivAsock = io(BASE, { transports: ['websocket'] });
+    const ivBsock = io(BASE, { transports: ['websocket'] });
+    const ivCsock = io(BASE, { transports: ['websocket'] });
+    const ivGsock = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => ivAsock.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => ivBsock.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => ivCsock.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => ivGsock.on('connect', r)), sleep(3000)])
+    ]);
+    ivAsock.emit('signup', { username: ivA, password: 'ivpw' });
+    await sleep(100);
+    ivBsock.emit('signup', { username: ivB, password: 'ivpw' });
+    await sleep(100);
+    ivCsock.emit('signup', { username: ivC, password: 'ivpw' });
+    await sleep(100);
+    // Each user signs in TWICE (a second session for the later join attempts):
+    // authenticateUser issues a FRESH session per call, so the FIRST ids are
+    // what the 'auth' events below consume (and they become stale for any
+    // later auth) — the SECOND ids are kept for the invite-bound join phase.
+    ivAsock.once('signin', () => {});
+    ivAsock.emit('signin', { username: ivA, password: 'ivpw' });
+    await sleep(100);
+    ivBsock.once('signin', () => {});
+    ivBsock.emit('signin', { username: ivB, password: 'ivpw' });
+    await sleep(100);
+    ivCsock.once('signin', () => {});
+    ivCsock.emit('signin', { username: ivC, password: 'ivpw' });
+    await sleep(100);
+    const ivAs = await signinWithRetry(ivAsock, ivA, 'ivpw');
+    const ivBs = await signinWithRetry(ivBsock, ivB, 'ivpw');
+    const ivCs = await signinWithRetry(ivCsock, ivC, 'ivpw');
+    if (!(ivAs && ivBs && ivCs)) fail('T31 invites: signup/signin setup', `A=${!!ivAs} B=${!!ivBs} C=${!!ivCs}`);
+
+    // Authenticate A NOW (socket.data.user) — the failure-reason emissions below
+    // require an authenticated inviter. B and C authenticate only in the
+    // join phase (their first 'auth' double as the "automatic invites push"
+    // check and the target join).
+    ivAsock.emit('auth', ivAs, null);
+    await sleep(300);
+
+    // Failure reasons (contract §2): guest -> auth; bad method -> method-na
+    // (T33 note: 'rapid' became a VALID method in contract 36, so the
+    // bad-method case now uses 'blitz'; T33 re-asserts both 'rapid' accepted
+    // and 'blitz' rejected, including on unauthenticated sockets); unknown
+    // target -> no-user; self -> self. Each must emit invite:failed with
+    // exactly {reason}, and NO invite:created.
+    const ivAFailed = [];
+    const ivACreated = [];
+    ivAsock.on('invite:failed', d => ivAFailed.push(d));
+    ivAsock.on('invite:created', d => ivACreated.push(d));
+    ivGsock.on('invite:failed', d => ivAFailed.push(d));
+    // 1) unauthenticated guest
+    ivGsock.emit('invite:create', { targetUsername: ivB, method: 'standard' });
+    await sleep(200);
+    // 2) bad method (authenticated) — 'blitz' after T33 (was 'rapid')
+    ivAsock.emit('invite:create', { targetUsername: ivB, method: 'blitz' });
+    await sleep(200);
+    // 3) unknown user
+    ivAsock.emit('invite:create', { targetUsername: 'nobody_x9', method: 'standard' });
+    await sleep(200);
+    // 4) self
+    ivAsock.emit('invite:create', { targetUsername: ivA, method: 'standard' });
+    await sleep(200);
+    const reasons = ivAFailed.map(d => d && d.reason);
+    if (ivAFailed.length === 4 && JSON.stringify(reasons) === JSON.stringify(['auth', 'method-na', 'no-user', 'self']) && ivACreated.length === 0)
+      pass('T31: invite:failed reasons [auth, method-na, no-user, self] (4/4, no invite:created)');
+    else
+      fail('T31: invite:failed reasons', `got=${JSON.stringify(reasons)} created=${JSON.stringify(ivACreated)}`);
+
+    // Success: invite A -> B. Record stored; inviter gets invite:created {matchId}.
+    ivAsock.emit('invite:create', { targetUsername: ivB, method: 'standard' });
+    await waitFor(() => ivACreated.length === 1, 3000);
+    const ivMatchId = ivACreated[0] && ivACreated[0].matchId;
+    if (ivMatchId && /^[a-z0-9]{8}$/.test(ivMatchId))
+      pass('T31: invite:created {matchId: /^a-z0-9{8}$/} (' + ivMatchId + ')');
+    else
+      fail('T31: invite:created', JSON.stringify(ivACreated));
+
+    // Automatic push: B authenticates (no matchId) -> receives `invites` with the
+    // live record {from, fromElo, method, matchId, createdAt}.
+    let ivBInvites = null;
+    ivBsock.on('invites', d => { if (Array.isArray(d)) ivBInvites = d; });
+    if (ivBs) ivBsock.emit('auth', ivBs, null);
+    await waitFor(() => ivBInvites !== null, 3000);
+    const ivBRec = ivBInvites && ivBInvites[0];
+    if (ivBInvites && ivBInvites.length === 1 && ivBRec && ivBRec.from === ivA && ivBRec.method === 'standard' &&
+        ivBRec.matchId === ivMatchId && typeof ivBRec.createdAt === 'string' && !isNaN(Date.parse(ivBRec.createdAt)) &&
+        Number(ivBRec.fromElo) === 1500)
+      pass('T31: automatic invites push after authenticated auth — record {from, fromElo:1500, method, matchId, createdAt}');
+    else
+      fail('T31: automatic invites push', JSON.stringify(ivBInvites));
+
+    // invites:list while the match is live -> 1 record.
+    ivBsock.removeAllListeners('invites'); ivBInvites = null;
+    ivBsock.on('invites', d => { if (Array.isArray(d)) ivBInvites = d; });
+    ivBsock.emit('invites:list');
+    await waitFor(() => ivBInvites !== null, 3000);
+    if (ivBInvites && ivBInvites.length === 1 && ivBInvites[0].matchId === ivMatchId)
+      pass('T31: invites:list (match live) -> 1 record');
+    else
+      fail('T31: invites:list live', JSON.stringify(ivBInvites));
+
+    // Invite-bound join: the inviter (A) joins first (host/white per existing
+    // semantics: first participant = player1Socket). Then the TARGET (B) joins
+    // as black. Guest and wrong-user are both refused (gameNotFound) because
+    // they are neither invite.to nor invite.from.
+    let ivGNotFound = false, ivCNotFound = false, ivBNotFound = false;
+    let ivAColor = null, ivBColor = null;
+    ivGsock.on('gameNotFound', () => { ivGNotFound = true; });
+    ivCsock.on('gameNotFound', () => { ivCNotFound = true; });
+    ivBsock.on('gameNotFound', () => { ivBNotFound = true; });
+    ivAsock.on('startGame', (c) => { ivAColor = c; });
+    ivBsock.on('startGame', (c) => { ivBColor = c; });
+    // Step 1: inviter A joins first -> white (player1Socket)
+    ivAsock.emit('auth', ivAs, ivMatchId);
+    await sleep(500);
+    // Step 2: guest is refused (no socket.data.user). A is seated (player1)
+    // but startGame only fires once B is seated, so aColor is still null here.
+    ivGsock.emit('auth', null, ivMatchId);
+    await sleep(300);
+    if (ivGNotFound && ivAColor === null && ivBColor === null)
+      pass('T31: invite-bound join — guest refused (gameNotFound; only inviter seated so far)');
+    else
+      fail('T31: invite-bound guest refusal', `gNotFound=${ivGNotFound} aColor=${ivAColor} bColor=${ivBColor}`);
+    // Step 3: wrong registered user C is refused
+    ivCsock.emit('auth', ivCs, ivMatchId);
+    await sleep(300);
+    if (ivCNotFound && ivBColor === null)
+      pass('T31: invite-bound join — wrong registered user refused (gameNotFound)');
+    else
+      fail('T31: invite-bound wrong-user refusal', `cNotFound=${ivCNotFound} bColor=${ivBColor}`);
+    // Step 4: target B joins as black
+    ivBsock.emit('auth', ivBs, ivMatchId);
+    await sleep(500);
+    if (ivBColor === 1 && !ivBNotFound)
+      pass('T31: invite-bound join — target joins as black (color 1), both seated');
+    else
+      fail('T31: invite-bound target join', `bColor=${ivBColor} bNotFound=${ivBNotFound}`);
+    // A's color should be 0 (white, first seat)
+    if (ivAColor === 0)
+      pass('T31: invite-bound join — inviter seated white (host, color 0)');
+    else
+      fail('T31: invite-bound inviter color', `aColor=${ivAColor}`);
+
+    // Live-filter: after the invite game ends (black resigns), the match is
+    // spliced from the pool; invites:list must return [] although the stored
+    // record remains (RAM + invites.json).
+    let ivAEnd = null, ivBEnd = null;
+    ivAsock.on('gameEnd', d => { ivAEnd = d; });
+    ivBsock.on('gameEnd', d => { ivBEnd = d; });
+    ivBsock.emit('resign', ivMatchId);
+    await waitFor(() => ivAEnd && ivBEnd, 3000);
+    await sleep(200);
+    ivBsock.removeAllListeners('invites'); ivBInvites = null;
+    ivBsock.on('invites', d => { if (Array.isArray(d)) ivBInvites = d; });
+    ivBsock.emit('invites:list');
+    await waitFor(() => ivBInvites !== null, 3000);
+    if (ivAEnd && ivBEnd && ivBInvites && ivBInvites.length === 0)
+      pass('T31: invites:list after match ends -> [] (dead match filtered, record kept)');
+    else
+      fail('T31: invites:list dead filter', `end=${JSON.stringify(ivAEnd)}/${JSON.stringify(ivBEnd)} list=${JSON.stringify(ivBInvites)}`);
+
+    // games.csv row for the invite game: A(white, host) vs B(black, target),
+    // B resigns -> B loses -> result white-win. A's elo goes up, B's goes down.
+    const ivRows = loadGames().filter(g => (g.white === ivA && g.black === ivB) || (g.white === ivB && g.black === ivA));
+    if (ivRows.length === 1 && ivRows[0].result === 'white-win' && ivRows[0].reason === 'resign' &&
+        ivRows[0].white === ivA && ivRows[0].black === ivB &&
+        ivRows[0].whiteEloBefore === 1500 && ivRows[0].blackEloBefore === 1500 &&
+        ivRows[0].whiteEloAfter > 1500 && ivRows[0].blackEloAfter < 1500)
+      pass('T31: games.csv row for the invite game — A(white) vs B(black), resign -> white-win, elo 1500/1500 before, ' + ivRows[0].whiteEloAfter + '/' + ivRows[0].blackEloAfter + ' after');
+    else
+      fail('T31: games.csv invite row', JSON.stringify(ivRows));
+
+    // A dead invite id later re-authed -> gameNotFound (graceful, contract §3).
+    ivCsock.removeAllListeners('gameNotFound'); ivCNotFound = false;
+    ivCsock.on('gameNotFound', () => { ivCNotFound = true; });
+    ivCsock.emit('auth', ivCs, ivMatchId);
+    await sleep(300);
+    if (ivCNotFound)
+      pass('T31: dead invite match id after end -> gameNotFound (graceful)');
+    else
+      fail('T31: dead invite id', 'no gameNotFound');
+
+    // --- GET /account ---
+    // no cookie -> 302 redirect to / (redirect:manual so we can assert it)
+    let accNoAuth = null, accErr = '';
+    try {
+      accNoAuth = await fetch(BASE + '/account', { redirect: 'manual' });
+    } catch (e) { accErr = String(e); }
+    if (accNoAuth && accNoAuth.status === 302 && (accNoAuth.headers.get('location') || '').includes('/'))
+      pass('T31: GET /account without cookie -> 302 Location /');
+    else
+      fail('T31: GET /account no cookie', `status=${accNoAuth && accNoAuth.status} loc=${accNoAuth && accNoAuth.headers.get('location')} ${accErr}`);
+    // with A's cookie -> 200 with username, elo (updated by the resign win), games
+    let accHtml = null, accStatus = null, accErr2 = '';
+    try {
+      const accRes = await fetch(BASE + '/account', { redirect: 'manual', headers: { cookie: 'sessionID=' + ivAs } });
+      accStatus = accRes.status;
+      accHtml = await accRes.text();
+    } catch (e) { accErr2 = String(e); }
+    // A's current elo: read from the users file (RAM elo mirrors it after saveUsersFile)
+    const aUserNow = loadUsersFile().find(u => u.username === ivA);
+    if (accStatus === 200 && accHtml && accHtml.includes(ivA) && aUserNow && accHtml.includes(String(aUserNow.elo)) && accHtml.includes(ivB))
+      pass('T31: GET /account with cookie -> 200, contains username + current elo (' + aUserNow.elo + ') + opponent');
+    else
+      fail('T31: GET /account with cookie', `status=${accStatus} hasName=${accHtml && accHtml.includes(ivA)} hasElo=${aUserNow && accHtml && accHtml.includes(String(aUserNow.elo))} hasOpp=${accHtml && accHtml.includes(ivB)} ${accErr2}`);
+    // Row data check — markup is S-B's (contract: S-A's stub may be refined to use
+    // the same server-provided fields); the assertion targets the fields the
+    // contract guarantees in the row: opponent, per-view result (Победа for a win),
+    // elo before (1500) / after (A's new value). Newest-first ordering and the
+    // method field are server-side (games array); the e2e harness covers the DOM.
+    if (accHtml && aUserNow) {
+      const rowOk = accHtml.includes(ivB) &&
+        (accHtml.includes('Победа') || /result-win/.test(accHtml)) &&
+        accHtml.includes('1500') && accHtml.includes(String(aUserNow.elo));
+      if (accStatus === 200 && accHtml.includes(ivA) && rowOk)
+        pass('T31: /account renders the game row — opponent, per-view result (Победа), elo 1500→' + aUserNow.elo);
+      else
+        fail('T31: /account games row', `rowOk=${rowOk} hasB=${accHtml.includes(ivB)} snippet=${accHtml.slice(0, 300)}`);
+    } else {
+      fail('T31: /account games row', 'response or user missing');
+    }
+
+    // --- GET /api/me (contract addendum: lobby session restore) ---
+    let meOk = null, meOkStatus = null, meErr = '';
+    try {
+      const meRes = await fetch(BASE + '/api/me', { redirect: 'manual', headers: { cookie: 'sessionID=' + ivAs } });
+      meOkStatus = meRes.status;
+      meOk = await meRes.json();
+    } catch (e) { meErr = String(e); }
+    if (meOkStatus === 200 && meOk && meOk.username === ivA && typeof meOk.elo === 'number')
+      pass('T31: GET /api/me with valid cookie -> 200 {username, elo}');
+    else
+      fail('T31: GET /api/me valid cookie', `status=${meOkStatus} body=${JSON.stringify(meOk)} ${meErr}`);
+    let meNoAuth = null, meNoAuthStatus = null, meNoAuthBody = null, meErr2 = '';
+    try {
+      const r = await fetch(BASE + '/api/me', { redirect: 'manual' });
+      meNoAuthStatus = r.status;
+      meNoAuthBody = await r.json().catch(() => null);
+    } catch (e) { meErr2 = String(e); }
+    if (meNoAuthStatus === 401)
+      pass('T31: GET /api/me without cookie -> 401');
+    else
+      fail('T31: GET /api/me no cookie', `status=${meNoAuthStatus} ${meErr2}`);
+    let meBogus = null, meBogusStatus = null;
+    try {
+      const r = await fetch(BASE + '/api/me', { redirect: 'manual', headers: { cookie: 'sessionID=' + 'bogus' + Date.now() } });
+      meBogusStatus = r.status;
+    } catch (e) { meBogus = String(e); }
+    if (meBogusStatus === 401)
+      pass('T31: GET /api/me with bogus session cookie -> 401');
+    else
+      fail('T31: GET /api/me bogus cookie', `status=${meBogusStatus} ${meBogus}`);
+
+    ivAsock.disconnect(); ivBsock.disconnect(); ivCsock.disconnect(); ivGsock.disconnect();
+  }
+
+  // === T33 (contract 36): users directory, public profiles, method picker (server) ===
+  // SELF-CONTAINED: this section uses its own two users (t33u1/t33u2) so it does
+  // not depend on the T31 invite trio (ivA/ivB are block-scoped const and out of
+  // scope here). It runs after T31, so the suite state (a few 1516 users from
+  // F2/T1 + the rest at 1500) already exists.
+  {
+    // Two NEW users (adjacent names, equal 1500 elo) with ONE SOCKET PER USER
+    // (the T31 pattern): a 'signin' response carries no username, so two signins
+    // on ONE socket can cross under the parallel-load runner and a "kept" id can
+    // silently belong to the other user. Per-user sockets make each socket's
+    // responses unambiguous. The kept session ids are then used both for the
+    // explicit-'auth' joins in (5) and as handshake cookies in T33b — a session
+    // id is a plain id->user lookup (validateSession) and is not consumed by
+    // 'auth', so sockets may share one (T32 does this too).
+    const t33u1 = 't33u1_' + Math.random().toString(36).slice(2, 7);
+    const t33u2 = 't33u2_' + Math.random().toString(36).slice(2, 7);
+    const t33su1 = io(BASE, { transports: ['websocket'] });
+    const t33su2 = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => t33su1.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => t33su2.on('connect', r)), sleep(3000)])
+    ]);
+    t33su1.emit('signup', { username: t33u1, password: 't33pw' });
+    await sleep(100);
+    t33su2.emit('signup', { username: t33u2, password: 't33pw' });
+    await sleep(100);
+    const t33s1 = await signinWithRetry(t33su1, t33u1, 't33pw');
+    const t33s2 = await signinWithRetry(t33su2, t33u2, 't33pw');
+    if (!t33s1 || !t33s2) fail('T33 setup: signins', `s1=${!!t33s1} s2=${!!t33s2}`);
+
+    // (1) /api/users/stats: shape for ALL registered users + order invariants
+    //     (elo non-increasing; username ascending within each equal-elo group).
+    //     The new pair must be adjacent and in NAME order inside its equal-elo
+    //     group — that is the name-ASC tie-break this route must apply. Exact rank
+    //     positions are NOT asserted (the suite has 1516 users above them); the
+    //     global elo-desc / name-asc invariants are.
+    let stats = null, statsStatus = null, statsErr = '';
+    try {
+      const r = await fetch(BASE + '/api/users/stats');
+      statsStatus = r.status;
+      stats = await r.json();
+    } catch (e) { statsErr = String(e); }
+    if (statsStatus === 200 && Array.isArray(stats) && stats.length === loadUsersFile(USERS_CSV).length) {
+      const okShape = stats.every(x => typeof x.username === 'string' && typeof x.elo === 'number' && typeof x.games === 'number');
+      const orderOk = okShape && stats.every((x, i) =>
+        i === 0 || stats[i - 1].elo > x.elo || (stats[i - 1].elo === x.elo && stats[i - 1].username < x.username));
+      const iU1 = stats.findIndex(x => x.username === t33u1);
+      const iU2 = stats.findIndex(x => x.username === t33u2);
+      const pairOk = iU1 >= 0 && iU2 === iU1 + 1 && t33u1 < t33u2 &&
+        stats[iU1].elo === stats[iU2].elo && stats[iU1].elo === 1500;
+      if (orderOk && pairOk)
+        pass('T33: /api/users/stats — [{username, elo, games}] for ALL users; ordered elo desc then name asc (new 1500 pair adjacent in name order)');
+      else
+        fail('T33: /api/users/stats shape/order', `orderOk=${orderOk} pairOk=${pairOk} ${JSON.stringify(stats && stats.slice(0, 6))}`);
+    } else {
+      fail('T33: /api/users/stats', `status=${statsStatus} n=${stats && stats.length} ${statsErr}`);
+    }
+
+    // (2) GET /users: 200, the users table skeleton (Имя | Elo | Игр) and the new
+    //     users listed (the page is public — no cookie sent).
+    let usersHtml = null, usersStatus = null, usersErr = '';
+    try {
+      const r = await fetch(BASE + '/users');
+      usersStatus = r.status;
+      usersHtml = await r.text();
+    } catch (e) { usersErr = String(e); }
+    if (usersStatus === 200 && usersHtml &&
+        usersHtml.includes('Имя') && usersHtml.includes('Elo') && usersHtml.includes('Игр') &&
+        usersHtml.includes(t33u1) && usersHtml.includes(t33u2) &&
+        usersHtml.indexOf(t33u1) < usersHtml.indexOf(t33u2))
+      pass('T33: GET /users -> 200, users table (Имя | Elo | Игр), new users listed in name order');
+    else
+      fail('T33: GET /users', `status=${usersStatus} ${usersErr}`);
+
+    // (3) GET /user?name=<unknown> -> 404 with a short Russian message.
+    let u404 = null, u404Status = null, u404Err = '';
+    try {
+      const r = await fetch(BASE + '/user?name=t33nobody_' + Date.now());
+      u404Status = r.status;
+      u404 = await r.text();
+    } catch (e) { u404Err = String(e); }
+    if (u404Status === 404 && u404 && u404.includes('Пользователь не найден'))
+      pass('T33: GET /user?name=<unknown> -> 404 «Пользователь не найден»');
+    else
+      fail('T33: GET /user unknown 404', `status=${u404Status} ${u404Err}`);
+
+    // (3a) GET /user?name=<known> before any game -> 200, name+elo present, no rows.
+    let prof0 = null, prof0Status = null, prof0Err = '';
+    try {
+      const r = await fetch(BASE + '/user?name=' + t33u1);
+      prof0Status = r.status;
+      prof0 = await r.text();
+    } catch (e) { prof0Err = String(e); }
+    if (prof0Status === 200 && prof0 && prof0.includes(t33u1) && prof0.includes('1500') &&
+        (prof0.includes('Партий пока нет') || /colspan/.test(prof0)))
+      pass('T33: GET /user?name=<known> (no games yet) -> 200, name + elo, empty table');
+    else
+      fail('T33: GET /user known (empty)', `status=${prof0Status} ${prof0Err}`);
+
+    // (3b) GET /api/users/:name/games — raw rows JSON, newest first, per-view
+    //     result + method label. Before any game: 200 with an empty array.
+    let profGames0 = null, profGames0Status = null, profGames0Err = '';
+    try {
+      const r = await fetch(BASE + '/api/users/' + t33u1 + '/games');
+      profGames0Status = r.status;
+      profGames0 = await r.json();
+    } catch (e) { profGames0Err = String(e); }
+    if (profGames0Status === 200 && Array.isArray(profGames0) && profGames0.length === 0)
+      pass('T33: GET /api/users/:name/games (no games yet) -> 200 []');
+    else
+      fail('T33: /api/users/:name/games (empty)', `status=${profGames0Status} ${JSON.stringify(profGames0)} ${profGames0Err}`);
+
+    // (5) invite:create method 'rapid' (accepted) — lands in invites.json, the
+    //     invite-bound match (match.method) and games.csv (10th column) end-to-end.
+    //     t33u1 (inviter) invites t33u2 (target). The inviter's socket must have
+    //     socket.data.user set before it can both create the invite and pass the
+    //     invite-bound join rule (socket.data.user must be invite.from/to), so it
+    //     emits 'auth' first (the same event the production game page fires on
+    //     load) — matching the T31 two-auth pattern. Seating: the inviter joins
+    //     the invite match FIRST -> WHITE (host), the target joins SECOND -> BLACK;
+    //     the target resigns (black) -> a white-win with white=t33u1, black=t33u2.
+    t33su1.emit('auth', t33s1, null);           // set socket.data.user = t33u1 (host of an idle public match)
+    await sleep(400);
+    let t33Inv = null, t33EndA = null, t33EndB = null;
+    t33su1.on('invite:created', (x) => { t33Inv = x && x.matchId; });
+    t33su1.on('gameEnd', (d) => { t33EndA = d; });
+    const t33r = io(BASE, { transports: ['websocket'], extraHeaders: { cookie: 'sessionID=' + t33s2 } });
+    await Promise.race([new Promise(r => t33r.on('connect', r)), sleep(3000)]);
+    t33r.on('gameEnd', (d) => { t33EndB = d; });
+    t33su1.emit('invite:create', { targetUsername: t33u2, method: 'rapid' });
+    await waitFor(() => t33Inv !== null, 3000);
+    let inviteRow = null;
+    for (const f of [t33u1, t33u2]) {
+      const recs = loadInvitesFile().filter(i => i && i.to === f && i.matchId === t33Inv);
+      if (recs.length) { inviteRow = recs[0]; break; }
+    }
+    if (t33Inv && inviteRow && inviteRow.method === 'rapid' && inviteRow.from === t33u1 && inviteRow.to === t33u2)
+      pass('T33: invite method rapid accepted — stored in invites.json with method=rapid');
+    else
+      fail('T33: invite rapid in invites.json', JSON.stringify(inviteRow));
+
+    // match.method end-to-end: inviter (t33u1) joins first -> WHITE (host); the
+    // target (t33u2) joins second -> BLACK; the target resigns (black).
+    t33su1.emit('auth', t33s1, t33Inv);          // t33u1 = inviter -> WHITE (first seat in the invite match)
+    await sleep(500);
+    t33r.emit('auth', t33s2, t33Inv);             // t33u2 = target -> BLACK (second seat)
+    await sleep(500);
+    t33r.emit('resign', t33Inv);                  // t33u2 (black) resigns -> white-win
+    await waitFor(() => t33EndA && t33EndB, 5000);
+    await sleep(200);
+    const rapidRows = loadGames().filter(g => (g.white === t33u1 && g.black === t33u2) && g.method === 'rapid');
+    const rapidRow = rapidRows[rapidRows.length - 1];
+    const rapidOk = !!rapidRow && rapidRow.result === 'white-win' && rapidRow.reason === 'resign' &&
+      rapidRow.white === t33u1 && rapidRow.black === t33u2;
+    const endPayloadsOk = t33EndA && t33EndB && t33EndA.method === 'rapid' && t33EndB.method === 'rapid';
+    let csvRawOk = false;
+    try {
+      const raw = fs.readFileSync(GAMES_CSV, 'utf8').split('\n').filter(l => l.trim());
+      const headerOk = raw[0] === GAMES_CSV_HEADER;
+      const rowOk = raw.some(l => l.includes(',') && l.split(',')[9] === 'rapid' && l.split(',')[1] === t33u1 && l.split(',')[2] === t33u2);
+      csvRawOk = headerOk && rowOk;
+    } catch (e) { csvRawOk = false; }
+    if (rapidOk && endPayloadsOk && csvRawOk)
+      pass('T33: rapid method lands in match + games.csv (10th column) + gameEnd payload {…, method:"rapid"}');
+    else
+      fail('T33: rapid end-to-end', `row=${JSON.stringify(rapidRow)} end=${JSON.stringify(t33EndA)}/${JSON.stringify(t33EndB)} csv=${csvRawOk}`);
+
+    // (3c) AFTER the rapid game: the profile page + raw JSON for t33u1 (the WHITE
+    //     side, who WON) must show exactly one row — opponent t33u2, per-view
+    //     «Победа», method label «Рапид» (newest-first trivial with one row).
+    let prof1 = null, prof1Status = null, prof1Err = '';
+    try {
+      const r = await fetch(BASE + '/user?name=' + t33u1);
+      prof1Status = r.status;
+      prof1 = await r.text();
+    } catch (e) { prof1Err = String(e); }
+    if (prof1Status === 200 && prof1 && prof1.includes(t33u2) &&
+        (prof1.includes('Победа') || /result-win/.test(prof1)) && prof1.includes('Рапид'))
+      pass('T33: GET /user?name=<known> -> 200 + row (opponent, per-view «Победа», method «Рапид»)');
+    else
+      fail('T33: GET /user known (with game)', `status=${prof1Status} ${prof1Err}`);
+
+    let profGames1 = null, profGames1Status = null, profGames1Err = '';
+    try {
+      const r = await fetch(BASE + '/api/users/' + t33u1 + '/games');
+      profGames1Status = r.status;
+      profGames1 = await r.json();
+    } catch (e) { profGames1Err = String(e); }
+    if (profGames1Status === 200 && Array.isArray(profGames1) && profGames1.length === 1 &&
+        profGames1[0].opponent === t33u2 && profGames1[0].result === 'win' && profGames1[0].method === 'Рапид' &&
+        typeof profGames1[0].date === 'string')
+      pass('T33: GET /api/users/:name/games — ' + profGames1.length + ' row(s) {date, opponent, result, method}, newest first');
+    else
+      fail('T33: /api/users/:name/games', `status=${profGames1Status} ${JSON.stringify(profGames1 && profGames1[0])} ${profGames1Err}`);
+
+    // (6) legacy CSV (9 columns, no method) loads with method defaulted to 'standard'
+    {
+      const legacy = GAMES_CSV_HEADER_LEGACY + '\n' +
+        new Date().toISOString() + ',t33lu1,t33lu2,white-win,resign,1500,1516,1500,1484\n' +
+        new Date().toISOString() + ',t33lu1,-,black-win,resign,1500,1516,0,0\n';
+      const tmp = path.join(fs.mkdtempSync(new URL('..', import.meta.url).pathname + 't33-legacy-'), 'games.csv');
+      fs.writeFileSync(tmp, legacy);
+      const parsed = loadGames(tmp);
+      if (parsed.length === 2 && parsed.every(g => g.method === 'standard') && parsed[0].white === 't33lu1' && parsed[0].black === 't33lu2' && parsed[1].white === 't33lu1' && parsed[1].black === null)
+        pass('T33: legacy games.csv (9 columns, no method) loads with method defaulted to "standard"');
+      else
+        fail('T33: legacy CSV -> standard', JSON.stringify(parsed));
+    }
+
+    // (7) final state: users.csv (rewritten atomically by the server on each signup)
+    //     must contain the new pair, and games.csv must carry the rapid row alongside
+    //     the legacy-standard rows (10th column).
+    {
+      const all = loadGames();
+      const csvUsers = loadUsersFile(USERS_CSV).map(u => u.username);
+      const t33Ok = all.some(g => g.method === 'rapid' && g.white === t33u1 && g.black === t33u2) &&
+        csvUsers.includes(t33u1) && csvUsers.includes(t33u2);
+      if (t33Ok)
+        pass('T33: final state — users.csv has the new pair; games.csv rapid row (method column) alongside standard rows');
+      else
+        fail('T33: final state', `users=${JSON.stringify(csvUsers)} games=${JSON.stringify(all.map(g => [g.white, g.black, g.method]))}`);
+    }
+
+    // === T33b (contract 36, point 1): unauthenticated-directory-socket flows ===
+    // The /users page socket NEVER emits 'auth' — only the handshake cookie.
+    // Uses the SAME kept session ids (t33s1/t33s2) as cookies on FRESH sockets —
+    // the sessions are still valid (a session id is a plain id->user lookup;
+    // 'auth' does not consume it).
+    // (1) cookie-resolved invite:create {method:'standard'} must succeed
+    //     (invite:created) and be stored with the chosen method;
+    // (2) method 'blitz' must fail with invite:failed {reason:'method-na'} on the
+    //     same unauthenticated socket (T31 asserted 'blitz' only on an
+    //     authenticated game-page socket);
+    // (3) the TARGET's own unauthenticated (lobby-style) socket must receive the
+    //     live invite via invites:list on the cookie-resolved path.
+    {
+      const dirSocket = io(BASE, { transports: ['websocket'], extraHeaders: { cookie: 'sessionID=' + t33s1 } });
+      await Promise.race([new Promise(r => dirSocket.on('connect', r)), sleep(3000)]);
+      let t33bInv = null;
+      let blitzFailed = null, stdFailed = null;
+      dirSocket.on('invite:created', (x) => { t33bInv = x && x.matchId; });
+      dirSocket.on('invite:failed', (x) => { blitzFailed = x && x.reason; stdFailed = x && x.reason; });
+      // (2) first: 'blitz' -> method-na. Capture it in blitzFailed BEFORE the
+      // standard attempt (the failed-listener writes to both, so the blitz
+      // result is read immediately after its emit).
+      dirSocket.emit('invite:create', { targetUsername: t33u2, method: 'blitz' });
+      await waitFor(() => blitzFailed !== null, 3000);
+      const blitzWasMethodNa = blitzFailed === 'method-na';
+      // (1) then: 'standard' -> created (reset the failed capture so a spurious
+      // standard failure is what stdFailed reflects).
+      blitzFailed = null; stdFailed = null;
+      dirSocket.emit('invite:create', { targetUsername: t33u2, method: 'standard' });
+      await waitFor(() => t33bInv !== null, 3000);
+      let stored = null;
+      for (const f of [t33u1, t33u2]) {
+        const recs = loadInvitesFile().filter(i => i && i.to === f && i.matchId === t33bInv);
+        if (recs.length) { stored = recs[0]; break; }
+      }
+      if (blitzWasMethodNa)
+        pass(`T33b: invite:create on an UNAUTHENTICATED socket (no auth, handshake cookie only) — blitz -> invite:failed {reason:method-na}`);
+      else
+        fail('T33b: blitz -> method-na', `failed=${blitzFailed} created=${t33bInv}`);
+      if (t33bInv && stored && stored.method === 'standard' && stored.from === t33u1)
+        pass(`T33b: cookie-resolved invite:create {method:standard} -> invite:created, stored record {from, method:standard, matchId}`);
+      else
+        fail('T33b: cookie-resolved invite:create', `created=${t33bInv} stored=${JSON.stringify(stored)} stdFailed=${stdFailed}`);
+      // (3) The target's own LOBBY-STYLE socket (unauthenticated, cookie only)
+      //     must see the live invite via invites:list on the cookie path.
+      const lobbyB2 = io(BASE, { transports: ['polling'], extraHeaders: { cookie: 'sessionID=' + t33s2 } });
+      let b2Invites = null;
+      lobbyB2.on('invites', (p) => { b2Invites = p; });
+      if (lobbyB2.connected) lobbyB2.emit('invites:list');
+      else await new Promise(r => lobbyB2.on('connect', () => { lobbyB2.emit('invites:list'); r(); }));
+      const gotIt = await waitFor(() => Array.isArray(b2Invites) && b2Invites.some(i => i.from === t33u1 && i.matchId === t33bInv), 5000);
+      if (gotIt)
+        pass(`T33b: target's unauthenticated socket (cookie only) receives the live invite via invites:list`);
+      else
+        fail('T33b: target cookie-fallback invites:list', JSON.stringify(b2Invites));
+      dirSocket.disconnect(); lobbyB2.close();
+    }
+    t33su1.disconnect(); t33su2.disconnect(); t33r.disconnect();
+  }
+  // === T32 (orchestrator integration fixes, contract 32 browser smoke) ===
+  // (1) invites:list on an UNAUTHENTICATED lobby socket must resolve the user
+  //     from the handshake cookie — the LOBBY never emits 'auth' (only the game
+  //     page does), so the old `socket.data.user`-only gate dropped the request
+  //     and the invite target saw nothing. Cookie rides the polling handshake
+  //     via extraHeaders (same header the browser sends).
+  // (2) PRE-START opponent_disconnect (B3 path, zero moves) must write NO
+  //     games.csv row — a game that never started is not account history.
+  {
+    // Bogus/unregistered session cookie => the socket stays a guest => the
+    // server sends NO invites payload (guest path unchanged).
+    const lobbyA = io(BASE, { transports: ['polling'], extraHeaders: { cookie: 'sessionID=' + 't32-bogus-' + Date.now() } });
+    let badInvites = null;
+    lobbyA.on('invites', (p) => { badInvites = p; });
+    if (lobbyA.connected) lobbyA.emit('invites:list');
+    else await new Promise(r => lobbyA.on('connect', () => { lobbyA.emit('invites:list'); r(); }));
+    await sleep(1200);
+    if (badInvites === null)
+      pass('T32: invites:list with a bogus session cookie -> no invites payload (guest path unchanged)');
+    else
+      fail('T32: invites:list bogus cookie', JSON.stringify(badInvites));
+    lobbyA.close();
+  }
+
+  {
+    const t2c = 't32c_' + Math.random().toString(36).slice(2, 7);
+    const t2d = 't32d_' + Math.random().toString(36).slice(2, 7);
+    const sc = io(BASE, { transports: ['websocket'] });
+    const sd = io(BASE, { transports: ['websocket'] });
+    await Promise.all([
+      Promise.race([new Promise(r => sc.on('connect', r)), sleep(3000)]),
+      Promise.race([new Promise(r => sd.on('connect', r)), sleep(3000)])
+    ]);
+    sc.emit('signup', { username: t2c, password: 't32pw1' });
+    sd.emit('signup', { username: t2d, password: 't32pw1' });
+    await sleep(400);
+    const sidC = await signinWithRetry(sc, t2c, 't32pw1');
+    const sidD = await signinWithRetry(sd, t2d, 't32pw1');
+    if (!sidC || !sidD) fail('T32.2 setup: signins', `c=${!!sidC} d=${!!sidD}`);
+    // D hosts a private match, auths; C's LOBBY-STYLE socket (no 'auth', only
+    // the handshake cookie) asks for its invites -> sees D's invite.
+    let dHost = null;
+    sd.on('private-match', (id) => { if (dHost === null) dHost = id; });
+    sd.emit('private-match', null);
+    await Promise.race([new Promise(r => sd.once('private-match', r)), sleep(3000)]);
+    if (dHost !== null) sd.emit('auth', sidD, dHost);
+    await sleep(400);
+    let dInv = null;
+    sd.on('invite:created', (x) => { dInv = x && x.matchId; });
+    sd.emit('invite:create', { targetUsername: t2c, method: 'standard' });
+    await waitFor(() => dInv !== null, 3000);
+    const lobbyC = io(BASE, { transports: ['polling'], extraHeaders: { cookie: 'sessionID=' + sidC } });
+    let cInvites = null;
+    lobbyC.on('invites', (p) => { cInvites = p; });
+    if (lobbyC.connected) lobbyC.emit('invites:list');
+    else await new Promise(r => lobbyC.on('connect', () => { lobbyC.emit('invites:list'); r(); }));
+    const gotIt = await waitFor(() => Array.isArray(cInvites) && cInvites.some(i => i.from === t2d && i.matchId === dInv), 5000);
+    if (gotIt)
+      pass('T32: invites:list on an unauthenticated socket resolves the handshake cookie -> live invite delivered (lobby flow)');
+    else
+      fail('T32: invites:list cookie fallback', JSON.stringify(cInvites));
+    lobbyC.close();
+
+    // (2) CSV gate: C invites D into a fresh invite-bound match, D's socket
+    // disconnects BEFORE any move (pre-start). games.csv must stay clean for
+    // both users even though the old row would have been written ('-' guest or
+    // reg-vs-reg): zero moves + opponent_disconnect => skip.
+    let cInv2 = null;
+    sc.on('invite:created', (x) => { cInv2 = x && x.matchId; });
+    // C needs socket.data.user too: auth C with a match of its own.
+    let cHost = null;
+    sc.on('private-match', (id) => { if (cHost === null) cHost = id; });
+    sc.emit('private-match', null);
+    await Promise.race([new Promise(r => sc.once('private-match', r)), sleep(3000)]);
+    if (cHost !== null) sc.emit('auth', sidC, cHost);
+    await sleep(400);
+    sc.emit('invite:create', { targetUsername: t2d, method: 'standard' });
+    await waitFor(() => cInv2 !== null, 3000);
+    const rowsBefore = loadGames().filter(g => g.white === t2c || g.black === t2c || g.white === t2d || g.black === t2d).length;
+    // D joins the invite-bound match (auth with matchId), then leaves pre-start.
+    sd.emit('auth', sidD, cInv2);
+    await sleep(800);
+    sd.disconnect();
+    await sleep(1500); // endMatch flush
+    const rowsAfter = loadGames().filter(g => g.white === t2c || g.black === t2c || g.white === t2d || g.black === t2d).length;
+    if (rowsAfter === rowsBefore)
+      pass('T32: pre-start opponent_disconnect writes NO games.csv row (count ' + rowsBefore + ' unchanged)');
+    else
+      fail('T32: pre-start CSV gate', `rows ${rowsBefore} -> ${rowsAfter}`);
+    sc.close(); sd.close();
+  }
+
 
   console.log(`\n=== Results: ${passed}/${total} passed, ${failed} failed ===`);
   return failed === 0;

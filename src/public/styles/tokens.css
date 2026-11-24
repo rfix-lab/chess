@@ -1,0 +1,415 @@
+/* === Shared design tokens (contract 36c, D1) ===
+   One source of truth for the dark board-game aesthetic across all five
+   pages (index / game / users / user / account). Linked FIRST from every
+   page <head>, before the page-specific stylesheet.
+
+   The page CSS files consume these properties instead of redefining their own
+   :root blocks. A few names are load-bearing for the client JS:
+     - --board-dark / --board-light / --text are read via
+       getComputedStyle(root).getPropertyValue(...) in game.js
+       (updateBoardColors) — the board canvas colors follow the tokens.
+     - .hide / .show remain the ONLY visibility mechanism (JS toggles the
+       classList; never replace with [hidden] or display-only frameworks).
+
+   Theme resolution (same dual pattern as the previous per-page CSS):
+     - pages with a theme toggle set data-theme on <html> (theme.js);
+     - the lobby has no toggle and follows the OS colour scheme. */
+
+:root {
+  /* ---- colour: dark (default) — evening slate / steel board room ---- */
+  --bg-0: #0f131d;
+  --bg-1: #161d2c;
+  --bg-glow: rgba(108, 140, 255, 0.07);
+  --card: #1a2130;
+  --card-2: #111827;            /* inset surface: inputs, strips, menus */
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #e8ecf4;
+  --text-dim: #9aa4b8;
+  --text-faint: #6b7689;
+  --accent: #6c8cff;
+  --accent-strong: #4a68e8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(108, 140, 255, 0.14);
+  --ok: #37b37b;
+  --ok-soft: rgba(55, 179, 123, 0.14);
+  --danger: #e05a4a;
+  --danger-soft: rgba(224, 90, 74, 0.14);
+  --warn: #e0912b;
+  --warn-soft: rgba(224, 145, 43, 0.14);
+  --focus-ring: rgba(108, 140, 255, 0.35);
+  /* board (game.js reads these three via getComputedStyle) */
+  --board-light: #e9eef6;
+  --board-dark: #55648a;
+  /* ---- type ---- */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fs-3xl: 30px;
+  --lh: 1.5;
+  /* ---- spacing ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 44px;
+  /* ---- shape + depth ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+  --shadow-1: 0 4px 14px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 18px 48px rgba(0, 0, 0, 0.42);
+  /* ---- motion ---- */
+  --t-fast: 0.12s;
+  --t: 0.2s;
+  color-scheme: dark;
+}
+
+/* Light: pages where the toggle set data-theme="light" on <html>. */
+:root[data-theme="light"] {
+  --bg-0: #eef1f7;
+  --bg-1: #e3e8f2;
+  --bg-glow: rgba(74, 103, 216, 0.08);
+  --card: #ffffff;
+  --card-2: #f4f6fb;
+  --line: rgba(20, 30, 60, 0.10);
+  --line-strong: rgba(20, 30, 60, 0.18);
+  --text: #1f2430;
+  --text-dim: #5b6577;
+  --text-faint: #8b94a8;
+  --accent: #4a63d8;
+  --accent-strong: #3c51b8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(74, 99, 216, 0.12);
+  --ok: #238a58;
+  --ok-soft: rgba(35, 138, 88, 0.12);
+  --danger: #c74634;
+  --danger-soft: rgba(199, 70, 52, 0.12);
+  --warn: #b06e14;
+  --warn-soft: rgba(176, 110, 20, 0.14);
+  --focus-ring: rgba(74, 99, 216, 0.30);
+  --board-light: #e9eef6;
+  --board-dark: #55648a;
+  --shadow-1: 0 4px 14px rgba(30, 45, 90, 0.10);
+  --shadow-2: 0 18px 44px rgba(30, 45, 90, 0.14);
+  color-scheme: light;
+}
+
+/* Light: OS preference (lobby has no theme toggle — :root stays
+   attribute-less, so this media branch owns the light values there). */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg-0: #eef1f7;
+    --bg-1: #e3e8f2;
+    --bg-glow: rgba(74, 103, 216, 0.08);
+    --card: #ffffff;
+    --card-2: #f4f6fb;
+    --line: rgba(20, 30, 60, 0.10);
+    --line-strong: rgba(20, 30, 60, 0.18);
+    --text: #1f2430;
+    --text-dim: #5b6577;
+    --text-faint: #8b94a8;
+    --accent: #4a63d8;
+    --accent-strong: #3c51b8;
+    --accent-ink: #ffffff;
+    --accent-soft: rgba(74, 99, 216, 0.12);
+    --ok: #238a58;
+    --ok-soft: rgba(35, 138, 88, 0.12);
+    --danger: #c74634;
+    --danger-soft: rgba(199, 70, 52, 0.12);
+    --warn: #b06e14;
+    --warn-soft: rgba(176, 110, 20, 0.14);
+    --focus-ring: rgba(74, 99, 216, 0.30);
+    --board-light: #e9eef6;
+    --board-dark: #55648a;
+    --shadow-1: 0 4px 14px rgba(30, 45, 90, 0.10);
+    --shadow-2: 0 18px 44px rgba(30, 45, 90, 0.14);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Visibility mechanism — JS toggles these class names everywhere. */
+.hide {
+  display: none !important;
+}
+
+.show {
+  display: initial;
+}
+
+/* ================= Shared component vocabulary ================= */
+
+/* Buttons: the app has exactly four roles. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1;
+  min-height: 44px;
+  padding: 11px 18px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--card-2);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--t), border-color var(--t), color var(--t),
+    transform var(--t-fast), box-shadow var(--t);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* primary — the one saturated action on a screen (royal blue) */
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-1);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+/* secondary — surface card with a border */
+.btn-secondary {
+  background: var(--card);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--card-2);
+}
+
+/* danger — resignation, destructive confirms */
+.btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* ghost — quiet tertiary (registration, cancel-ish) */
+.btn-ghost {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--text-dim);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--card-2);
+}
+
+/* Pill stat chip (Elo, games count). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--card-2);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.chip-strong {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+/* Card surface. */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+
+/* Page shell: one vertical rhythm on every page. */
+.page {
+  min-height: 100vh;
+  margin: 0 auto;
+  width: min(94vw, 760px);
+  padding: calc(var(--sp-4) + env(safe-area-inset-top)) var(--sp-4) var(--sp-6);
+}
+
+/* Header pattern shared by users / user / account: back link left,
+   title center. */
+.page-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-5);
+  min-height: 44px;
+}
+
+.page-nav .nav-title {
+  flex: 1;
+  text-align: center;
+  margin: 0;
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.nav-back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--t), border-color var(--t);
+}
+
+.nav-back:hover {
+  background: var(--card-2);
+  border-color: var(--line-strong);
+}
+
+.nav-spacer {
+  width: 88px; /* keeps the title optically centered against the back link */
+  flex-shrink: 0;
+}
+
+/* Toast — identical geometry on every page. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 3000;
+  max-width: min(92vw, 420px);
+  padding: 12px 18px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  box-shadow: var(--shadow-2);
+  animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Modal overlay + box (game page modals use these). */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 9, 18, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: var(--sp-4);
+}
+
+.modal-box {
+  width: 90%;
+  max-width: 400px;
+  padding: var(--sp-6) var(--sp-5);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  text-align: center;
+}
+
+.modal-box h3 {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+}
+
+.modal-box p {
+  margin: 0 0 var(--sp-5);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  line-height: var(--lh);
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Empty-table state (paragraph outside the scrollable table — review fix,
+   design-36; .empty-row kept for any legacy table markup). */
+.empty-note {
+  margin: var(--sp-5) 0;
+  text-align: center;
+  color: var(--text-faint);
+}
+.empty-row td {
+  text-align: center;
+  color: var(--text-faint);
+  padding: var(--sp-6) var(--sp-3) !important;
+}

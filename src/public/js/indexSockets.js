@@ -1,44 +1,172 @@
+// Lobby page sockets (contract 32 — client scope).
+// The lobby NO LONGER generates a private link: that moved to the GAME page
+// ("Ссылка на игру"). The lobby now (a) handles login / registration and (b)
+// renders the 'invites' event so a logged-in user sees pending invitations.
+
 let socket = io();
+
+// login/signup form mode — [Вход] and [Регистрация] toggle it; #submit-auth
+// emits whichever event the current mode calls for.
+let authMode = 'login';
+
+// Show the shared form in the requested mode (events.js also exposes the old
+// submitLoginDetails/submitSignUpDetails; those still work and switch mode).
+function showAuthForm(mode) {
+  authMode = (mode === 'signup') ? 'signup' : 'login';
+  const form = document.getElementById('form');
+  const title = document.getElementById('form-title');
+  const submit = document.getElementById('submit-auth');
+  if (!form || !submit) return;
+  if (title) title.textContent = (authMode === 'signup') ? 'Регистрация' : 'Вход';
+  submit.textContent = (authMode === 'signup') ? 'Зарегистрироваться' : 'Войти';
+  form.classList.remove('hide');
+  form.classList.add('show');
+}
+
+function hideAuthForm() {
+  const form = document.getElementById('form');
+  if (!form) return;
+  form.classList.remove('show');
+  form.classList.add('hide');
+}
+
+// Unified submit: emits 'signin' or 'signup' per the current mode.
+function submitAuth() {
+  if (authMode === 'signup') {
+    submitSignUpDetails();
+  } else {
+    submitLoginDetails();
+  }
+}
+
+// --- Session state helpers ---
+// Login state is read from the sessionID cookie (same check the GAME page uses
+// to hide invite UI from guests). A fresh load with a valid cookie shows the
+// authenticated controls immediately. /api/me below is the authority: it can
+// 200 (keep logged-in) or 401 (fall back to the logged-out form).
+function isLoggedIn() {
+  return readCookie('sessionID') != null;
+}
+
+// Contract 36: the username we are logged in as (null for guests). Used to mark
+// the own row on the /users page and kept here so reflectAuthState stays the
+// single source of truth for the lobby's auth-dependent UI.
+let meUsername = null;
+
+// Contract 36 §1: [Вход]/[Регистрация] are HIDDEN while logged in and restored
+// on logout. The stack order in index.ejs is [Играть], [Пользователи], [Вход],
+// [Регистрация] — hiding the bottom two leaves the stack intact.
+function setAuthButtonsVisible(visible) {
+  for (const id of ['login-button', 'register-button']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hide', !visible);
+  }
+}
+
+function reflectAuthState() {
+  const authed = document.getElementById('authed');
+  if (!authed) return;
+  if (isLoggedIn()) {
+    authed.classList.remove('hide');
+    authed.classList.add('show');
+    setAuthButtonsVisible(false);
+  } else {
+    authed.classList.remove('show');
+    authed.classList.add('hide');
+    setAuthButtonsVisible(true);
+  }
+}
+
+function doLogout() {
+  deleteCookie('sessionID');
+  meUsername = null;
+  hideAuthForm();
+  // Addendum (contract 32): the lobby restores login state from /api/me on page
+  // load, so clearing the cookie alone would be overwritten by the already-rendered
+  // state — reload to re-run the restore check (401 -> form).
+  window.location.reload();
+}
+
+// Big-button wiring (index.ejs).
+(function wireBigButtons() {
+  const login = document.getElementById('login-button');
+  const register = document.getElementById('register-button');
+  const usersBtn = document.getElementById('users-button');
+  const playBtn = document.getElementById('play-button');
+  if (login) login.addEventListener('click', () => showAuthForm('login'));
+  if (register) register.addEventListener('click', () => showAuthForm('signup'));
+  // Contract 36 integration fix (orchestrator smoke): #play-button had no click
+  // binding at all ([Играть] did nothing). `play` is defined in index.js
+  // (loaded before this file) and emits 'private-match' -> /game?matchId=#link.
+  if (playBtn && typeof play === 'function') playBtn.addEventListener('click', () => play());
+  // Contract 36 §1: [Пользователи] -> the /users directory page.
+  if (usersBtn) usersBtn.addEventListener('click', () => { window.location.href = '/users'; });
+  // A returning, still-authenticated user: reveal Кабинет + hide [Вход]/
+  // [Регистрация] at load time (cookie only — /api/me below is the authority on
+  // whether the session is still valid and corrects this if the cookie is stale).
+  reflectAuthState();
+})();;
+
+// --- Addendum (contract 32): lobby restore-on-load (bug: F5 loses the login) ---
+// The cookie survives the reload (writeCookie day=1), but the lobby used to
+// render the logged-out form unconditionally. The server route GET /api/me (S-A)
+// validates the cookie: 200 {username, elo} -> render the logged-in state
+// exactly as after a signin; 401 -> the form, as today. Network failure is
+// non-fatal (falls through to the logged-out form).
+async function restoreSession() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const me = await res.json();
+    if (!me || !me.username) return;
+    meUsername = me.username;
+    const successDiv = document.getElementById('auth-success');
+    if (successDiv) {
+      successDiv.textContent = 'Вы вошли как ' + me.username;
+      successDiv.classList.remove('hide');
+      successDiv.classList.add('show');
+    }
+    hideAuthForm();
+    reflectAuthState();
+    // A valid session means the server recognizes us — request our live invites.
+    socket.emit('invites:list');
+  } catch (e) { /* non-fatal: stay logged out */ }
+}
+restoreSession();;
 
 socket.on('signin', (valid, sessionID) => {
   if (valid) {
-    let form = document.getElementById('form');
     let successDiv = document.getElementById('auth-success');
     let failDiv = document.getElementById('auth-fail');
     let usrnDiv = document.getElementById('signup-fail-usrnmexists');
     let psdDiv = document.getElementById('signup-fail-pswdlen');
+    let invDiv = document.getElementById('signup-fail-pswdinvalid');
     let usernameInput = document.getElementById('username');
-    let playButton = document.getElementById('play-button');
 
-    form.classList.add('hide');
+    hideAuthForm();
 
-    if (failDiv.classList.contains('show')) {
-      failDiv.classList.remove('show');
-      failDiv.classList.add('hide');
-    }
-    if (usrnDiv.classList.contains('show')) {
-      usrnDiv.classList.remove('show');
-      usrnDiv.classList.add('hide');
-    }
-    if (psdDiv.classList.contains('show')) {
-      psdDiv.classList.remove('show');
-      psdDiv.classList.add('hide');
-    }
+    if (failDiv.classList.contains('show')) failDiv.classList.remove('show');
+    [usrnDiv, psdDiv, invDiv].forEach(d => { if (d) d.classList.remove('show'); });
 
-    successDiv.textContent = 'Logged in as ' + usernameInput.value;
+    if (usernameInput && usernameInput.value) {
+      meUsername = usernameInput.value;
+      successDiv.textContent = 'Вы вошли как ' + usernameInput.value;
+    }
     successDiv.classList.remove('hide');
     successDiv.classList.add('show');
 
-    playButton.innerHTML = 'Play';
-
     writeCookie('sessionID', sessionID, 1);
+    reflectAuthState();
+    // Contract 32 §3: a fresh authenticated load gets its live invites pushed
+    // right after auth — request them explicitly too (idempotent).
+    socket.emit('invites:list');
   } else {
     let usernameInput = document.getElementById('username');
     let passwordInput = document.getElementById('password');
     let failDiv = document.getElementById('auth-fail');
 
-    usernameInput.value = "";
-    passwordInput.value = "";
+    if (usernameInput) usernameInput.value = "";
+    if (passwordInput) passwordInput.value = "";
 
     failDiv.classList.remove('hide');
     failDiv.classList.add('show');
@@ -47,16 +175,15 @@ socket.on('signin', (valid, sessionID) => {
 
 socket.on('signup', valid => {
   if (valid == 1) {
+    // A fresh registration must log the user in to get a sessionID cookie.
     let usernameInput = document.getElementById('username');
     let passwordInput = document.getElementById('password');
-
-    let username = usernameInput.value;
-    let password = passwordInput.value;
-
-    socket.emit('signin', {
-      username: username,
-      password: password
-    });
+    if (usernameInput && passwordInput) {
+      socket.emit('signin', {
+        username: usernameInput.value,
+        password: passwordInput.value
+      });
+    }
   } else {
     let signupDiv = document.getElementById('signup-fail');
     let failDiv = document.getElementById('auth-fail');
@@ -116,20 +243,63 @@ socket.on('signup', valid => {
   });
 })();
 
-socket.on('private-match', matchId => {
-  // C5: remember the match id so play() joins the author's own private match.
-  window.__privateMatchId = matchId;
+// Contract 32: private-link generation MOVED to the GAME page ("Ссылка на игру").
+// The lobby no longer listens for 'private-match' at all (its own socket never
+// requests one now, and the E2E harness creates the match via its OWN raw socket).
 
-  let linkDiv = document.getElementById('generated-link'); 
+// --- Invites (contract 32 §3) ---
+// Server payload: [{from, fromElo, method, matchId, createdAt}] — stored
+// invites addressed to the current user whose match is still LIVE. Rendered as
+// rows "Имя (Elo N) — метод: <method> [Принять]" -> /game?matchId=<id>.
+function renderInvites(payload) {
+  const section = document.getElementById('invites');
+  const list = document.getElementById('invites-list');
+  if (!section || !list) return;
+  if (!Array.isArray(payload)) payload = [];
 
-  // BUGFIX: location.host has no scheme ("mycheserv.duckdns.org") -> the browser
-  // treated href/url as RELATIVE -> /mycheserv.duckdns.org/game = "Cannot GET".
-  // location.origin includes the scheme (https://mycheserv.duckdns.org).
-  let url = window.location.origin + '/game?matchId=' + matchId;
+  if (payload.length === 0) {
+    section.classList.remove('show');
+    section.classList.add('hide');
+    list.textContent = '';
+    return;
+  }
 
-  linkDiv.textContent = url;
-  linkDiv.href = url;
+  section.classList.remove('hide');
+  section.classList.add('show');
+  list.textContent = '';
 
-  linkDiv.classList.remove('hide');
-  linkDiv.classList.add('show');
+  for (const inv of payload) {
+    const row = document.createElement('div');
+    row.className = 'invite-row';
+
+    const label = document.createElement('span');
+    label.className = 'invite-label';
+    // Contract 36 §2: the server now sends the REAL method ('standard'|'rapid');
+    // the user-visible text is the Russian label (matches the picker: Классика/Рапид).
+    const methodText = inv.method === 'rapid' ? 'Рапид' : 'Классика';
+    label.textContent = inv.from + (inv.fromElo != null ? ` (Elo ${inv.fromElo})` : '') +
+      ' — метод: ' + methodText;
+    row.appendChild(label);
+
+    const accept = document.createElement('a');
+    accept.className = 'invite-accept';
+    accept.href = '/game?matchId=' + encodeURIComponent(inv.matchId);
+    accept.textContent = 'Принять';
+    row.appendChild(accept);
+
+    list.appendChild(row);
+  }
+}
+
+// Server emits 'invites' on load / after a successful auth (and on any change
+// per the contract). Replace the section contents each time.
+socket.on('invites', (payload) => {
+  renderInvites(payload);
 });
+
+// On a fresh page load, if we already carry a session cookie, pull our invites.
+// (The server also pushes them right after an authenticated 'auth', but the
+// lobby page opens its own socket without authing, so we request here.)
+if (isLoggedIn()) {
+  socket.emit('invites:list');
+}
