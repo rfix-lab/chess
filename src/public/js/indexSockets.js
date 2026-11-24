@@ -21,6 +21,12 @@ function showAuthForm(mode) {
   submit.textContent = (authMode === 'signup') ? 'Зарегистрироваться' : 'Войти';
   form.classList.remove('hide');
   form.classList.add('show');
+  // F4b (contract 38): the card can sit lower than the fold on small phones —
+  // bring it into view when revealed (blocks the "modal floats over the button
+  // stack" complaint; harmless when it is already fully visible). Idempotent:
+  // re-clicking the trigger just re-runs this, which re-scrolls the card to
+  // the top of the viewport.
+  if (typeof form.scrollIntoView === 'function') form.scrollIntoView({ block: 'nearest' });
 }
 
 function hideAuthForm() {

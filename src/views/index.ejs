@@ -43,21 +43,31 @@
     <button id="register-button" class="mid-btn">Регистрация</button>
   </div>
 
-  <!-- Login / registration form (revealed by [Вход] or [Регистрация]). -->
+  <!-- Login / registration form (revealed by [Вход] or [Регистрация]).
+       F4b (contract 38): this card doubles as the mobile modal — one field
+       per row, label above its input, all full-width, dark autofill; fits the
+       viewport and scrolls internally above 90vh. #form is the JS/E2E hook
+       (indexSockets toggles its .hide/.show); the visible, scrollable card is
+       the inner .auth-scroll, which carries the card chrome so the shadow
+       never clips at the page edge. The same markup serves both Вход and
+       Регистрация; indexSockets only rewrites #form-title and the submit
+       label. -->
   <div id="form" class="auth-card hide">
-    <h2 id="form-title">Вход</h2>
-    <div class="field">
-      <label for="username">Имя пользователя</label>
-      <input type="text" name="username" id="username" list="username-list" autocomplete="off">
-      <datalist id="username-list"></datalist>
-    </div>
-    <div class="field">
-      <label for="password">Пароль</label>
-      <input type="password" name="password" id="password">
-    </div>
-    <div class="actions">
-      <button class="btn-primary" id="submit-auth" onclick="submitAuth()">Войти</button>
-    </div>
+    <div class="auth-scroll">
+      <h2 id="form-title">Вход</h2>
+      <div class="field">
+        <label for="username">Имя пользователя</label>
+        <input type="text" name="username" id="username" list="username-list" autocomplete="off">
+        <datalist id="username-list"></datalist>
+      </div>
+      <div class="field">
+        <label for="password">Пароль</label>
+        <input type="password" name="password" id="password">
+      </div>
+      <div class="actions">
+        <button class="btn-primary" id="submit-auth" onclick="submitAuth()">Войти</button>
+      </div>
+    </div><!-- /.auth-scroll -->
   </div>
 
   <!-- Invites (rendered from the server 'invites' event; contract 32 §3).

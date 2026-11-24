@@ -1,0 +1,238 @@
+{
+  "base": "http://127.0.0.1:34567",
+  "rows": [
+    {
+      "test": "F4b login modal @ 320x568: right edge 304 <= innerWidth 320, left 16 >= 0, username input inside (L 41 R 279), rows no-overlap (gaps [12]), submit btn 238x44 == input 238, scrollWidth 320 == innerWidth 320",
+      "status": "PASS",
+      "detail": "form={\"left\":16,\"right\":304,\"top\":275.5,\"bottom\":567.5,\"w\":288,\"h\":292} fields=[[331.5,403],[415,486.5]] overlaps=[] btn={\"left\":41,\"right\":279,\"top\":498.5,\"bottom\":542.5,\"w\":238,\"h\":44} btnEqInput=true btnH=44 autofillShadow=none err=[]"
+    },
+    {
+      "test": "F4b login modal @ 390x844: right edge 374 <= innerWidth 390, left 16 >= 0, username input inside (L 41 R 349), rows no-overlap (gaps [12]), submit btn 308x44 == input 308, scrollWidth 390 == innerWidth 390",
+      "status": "PASS",
+      "detail": "form={\"left\":16,\"right\":374,\"top\":450.25,\"bottom\":742.25,\"w\":358,\"h\":292} fields=[[506.25,577.75],[589.75,661.25]] overlaps=[] btn={\"left\":41,\"right\":349,\"top\":673.25,\"bottom\":717.25,\"w\":308,\"h\":44} btnEqInput=true btnH=44 autofillShadow=none err=[]"
+    },
+    {
+      "test": "F4b login submit @ 390x844 (raw-socket user modal_f4b_i0knvb): form closed, auth-success shows username, Кабинет state active, [Вход] hidden",
+      "status": "PASS",
+      "detail": "{\"formHidden\":true,\"formVisible2\":false,\"successShown\":true,\"successText\":\"Вы вошли как modal_f4b_i0knvb\",\"failShown\":false,\"authedShown\":true,\"loginHidden\":true}"
+    },
+    {
+      "test": "F4b login modal @ 1280x900: right edge 860 <= innerWidth 1280, left 420 >= 0, username input inside (L 445 R 835), rows no-overlap (gaps [12]), submit btn 390x44 == input 390, scrollWidth 1280 == innerWidth 1280",
+      "status": "PASS",
+      "detail": "form={\"left\":420,\"right\":860,\"top\":478.25,\"bottom\":770.25,\"w\":440,\"h\":292} fields=[[534.25,605.75],[617.75,689.25]] overlaps=[] btn={\"left\":445,\"right\":835,\"top\":701.25,\"bottom\":745.25,\"w\":390,\"h\":44} btnEqInput=true btnH=44 autofillShadow=none err=[]"
+    }
+  ],
+  "metrics": {
+    "320x568": {
+      "innerWidth": 320,
+      "innerHeight": 568,
+      "scrollWidth": 320,
+      "form": {
+        "left": 16,
+        "right": 304,
+        "top": 275.5,
+        "bottom": 567.5,
+        "w": 288,
+        "h": 292
+      },
+      "formFits": true,
+      "formMaxHeight": true,
+      "usernameInput": {
+        "left": 41,
+        "right": 279,
+        "top": 359,
+        "bottom": 403,
+        "w": 238
+      },
+      "usernameInViewport": true,
+      "passwordInput": {
+        "left": 41,
+        "right": 279,
+        "top": 442.5,
+        "bottom": 486.5,
+        "w": 238
+      },
+      "fieldRects": [
+        {
+          "top": 331.5,
+          "bottom": 403,
+          "left": 41,
+          "right": 279,
+          "h": 71.5
+        },
+        {
+          "top": 415,
+          "bottom": 486.5,
+          "left": 41,
+          "right": 279,
+          "h": 71.5
+        }
+      ],
+      "overlaps": [],
+      "gaps": [
+        12
+      ],
+      "rowsGapMin": 12,
+      "submitBtn": {
+        "left": 41,
+        "right": 279,
+        "top": 498.5,
+        "bottom": 542.5,
+        "w": 238,
+        "h": 44
+      },
+      "btnEqInput": true,
+      "btnHeight": 44,
+      "formVisible": true,
+      "formTitle": "Вход",
+      "autofill": {
+        "boxShadow": "none",
+        "webkitTextFill": "rgb(31, 36, 48)"
+      }
+    },
+    "390x844": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "scrollWidth": 390,
+      "form": {
+        "left": 16,
+        "right": 374,
+        "top": 450.25,
+        "bottom": 742.25,
+        "w": 358,
+        "h": 292
+      },
+      "formFits": true,
+      "formMaxHeight": true,
+      "usernameInput": {
+        "left": 41,
+        "right": 349,
+        "top": 533.75,
+        "bottom": 577.75,
+        "w": 308
+      },
+      "usernameInViewport": true,
+      "passwordInput": {
+        "left": 41,
+        "right": 349,
+        "top": 617.25,
+        "bottom": 661.25,
+        "w": 308
+      },
+      "fieldRects": [
+        {
+          "top": 506.25,
+          "bottom": 577.75,
+          "left": 41,
+          "right": 349,
+          "h": 71.5
+        },
+        {
+          "top": 589.75,
+          "bottom": 661.25,
+          "left": 41,
+          "right": 349,
+          "h": 71.5
+        }
+      ],
+      "overlaps": [],
+      "gaps": [
+        12
+      ],
+      "rowsGapMin": 12,
+      "submitBtn": {
+        "left": 41,
+        "right": 349,
+        "top": 673.25,
+        "bottom": 717.25,
+        "w": 308,
+        "h": 44
+      },
+      "btnEqInput": true,
+      "btnHeight": 44,
+      "formVisible": true,
+      "formTitle": "Вход",
+      "autofill": {
+        "boxShadow": "none",
+        "webkitTextFill": "rgb(31, 36, 48)"
+      }
+    },
+    "login390": {
+      "formHidden": true,
+      "formVisible2": false,
+      "successShown": true,
+      "successText": "Вы вошли как modal_f4b_i0knvb",
+      "failShown": false,
+      "authedShown": true,
+      "loginHidden": true
+    },
+    "1280x900": {
+      "innerWidth": 1280,
+      "innerHeight": 900,
+      "scrollWidth": 1280,
+      "form": {
+        "left": 420,
+        "right": 860,
+        "top": 478.25,
+        "bottom": 770.25,
+        "w": 440,
+        "h": 292
+      },
+      "formFits": true,
+      "formMaxHeight": true,
+      "usernameInput": {
+        "left": 445,
+        "right": 835,
+        "top": 561.75,
+        "bottom": 605.75,
+        "w": 390
+      },
+      "usernameInViewport": true,
+      "passwordInput": {
+        "left": 445,
+        "right": 835,
+        "top": 645.25,
+        "bottom": 689.25,
+        "w": 390
+      },
+      "fieldRects": [
+        {
+          "top": 534.25,
+          "bottom": 605.75,
+          "left": 445,
+          "right": 835,
+          "h": 71.5
+        },
+        {
+          "top": 617.75,
+          "bottom": 689.25,
+          "left": 445,
+          "right": 835,
+          "h": 71.5
+        }
+      ],
+      "overlaps": [],
+      "gaps": [
+        12
+      ],
+      "rowsGapMin": 12,
+      "submitBtn": {
+        "left": 445,
+        "right": 835,
+        "top": 701.25,
+        "bottom": 745.25,
+        "w": 390,
+        "h": 44
+      },
+      "btnEqInput": true,
+      "btnHeight": 44,
+      "formVisible": true,
+      "formTitle": "Вход",
+      "autofill": {
+        "boxShadow": "none",
+        "webkitTextFill": "rgb(31, 36, 48)"
+      }
+    }
+  },
+  "user": "modal_f4b_i0knvb"
+}
