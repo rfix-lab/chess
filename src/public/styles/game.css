@@ -577,6 +577,15 @@ canvas#cnv {
   margin: 0 auto var(--sp-3);
 }
 
+/* Contract 38 F2: the status line shows a server takebackError message for
+   ~3 s (e.g. «Возврат хода уже отклонён») in an accent color; JS restores
+   the turn text afterwards. */
+#status.status-takeback-error {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
 .game-actions {
   gap: 1px;
 }

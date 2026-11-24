@@ -1,0 +1,67 @@
+{
+  "env": {
+    "port": 34588,
+    "chromium": "/snap/bin/chromium",
+    "serverLog": "/tmp/f2-takeback-server.log",
+    "time": "2026-11-24T08:39:58.592Z"
+  },
+  "matchId": "q852le83",
+  "rows": [
+    {
+      "test": "F2-A takeback button DISABLED before any move (no history)",
+      "status": "PASS",
+      "detail": "white disabled=true (rule: gameIsOver || myTurn || no history)"
+    },
+    {
+      "test": "F2-B white 1.e4 (canvas drag applied); after MY move the button is ENABLED",
+      "status": "PASS",
+      "detail": "boardsSync=true, whiteBtnDisabled=false, W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "F2-C offer modal on black page with RUSSIAN title + Принять/Отклонить",
+      "status": "PASS",
+      "detail": "title=\"Соперник предлагает вернуть ход\" accept=\"Принять\" decline=\"Отклонить\" visible=true"
+    },
+    {
+      "test": "F2-D accept: BOTH pages restore pre-move board, turn back to white (requester)",
+      "status": "PASS",
+      "detail": "boardsSync=true; W status=\"Your turn\" W-btnDisabled=true | B status=\"Opponent's turn\" B-btnDisabled=false; modalGone=true"
+    },
+    {
+      "test": "F2-E2 after decline the button is NOT permanently locked (stays enabled)",
+      "status": "PASS",
+      "detail": "whiteBtnDisabled=false, W=\"Opponent's turn\" B=\"Your turn\""
+    },
+    {
+      "test": "F2-E3 decline: white status line shows the server Russian message «Возврат хода уже отклонён» (no shake)",
+      "status": "PASS",
+      "detail": "status=\"Возврат хода уже отклонён\" statusClass=\"status-takeback-error\" cnvShake=false; rawEvents="
+    },
+    {
+      "test": "F2-E3b status restores to the turn text after the message window",
+      "status": "PASS",
+      "detail": "status=\"Opponent's turn\""
+    },
+    {
+      "test": "F2-E4 latch cleared by the next move: after white moves again the button is clickable again (no permanent lock)",
+      "status": "PASS",
+      "detail": "whiteBtnDisabled=false, W=\"Opponent's turn\" B=\"Your turn\"; rawEvents="
+    },
+    {
+      "test": "F2-F1 black just moved → BLACK takeback button armed",
+      "status": "PASS",
+      "detail": "blackBtnDisabled=false, B=\"Opponent's turn\""
+    },
+    {
+      "test": "F2-F2 black request + white accept: both pages restore the post-2.Nc3 position, turn back to black (requester); white (whose 2.Nc3 is the now-last move) re-arms, black disarms",
+      "status": "PASS",
+      "detail": "boardsSync=true; W status=\"Opponent's turn\" W-btn=false | B status=\"Your turn\" B-btn=true; strips W=0 B=0 (expected 0/0 — no captures yet)"
+    },
+    {
+      "test": "F2 no JS console/page errors on either page",
+      "status": "PASS",
+      "detail": "none"
+    }
+  ],
+  "serverTrace": []
+}

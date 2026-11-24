@@ -137,14 +137,17 @@ socket.on('reconnected', (color, gameId, boardState, turnState, lastMoveData) =>
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';
     can_move = true;
+    lastMoveWasMine = false; // my turn → the last applied move was the opponent's
   } else {
     document.getElementById('status').innerText = 'Opponent\'s turn';
     can_move = false;
+    lastMoveWasMine = true;  // opponent's turn → I just moved (restored on reconnect)
   }
   // Redraw the board after restoring state
   draw();
   render_board();
   renderCapturedPieces();
+  updateTakebackButton();
 });
 
 // Server says game is gone → redirect to lobby
@@ -173,11 +176,18 @@ function deleteSessionCookie() {
 let drawOfferDeclined = false;
 let challengeDeclined = false;
 let gameIsOver = false;
+// Contract 38 (F2): true when the last applied (validated) move was MINE —
+// the takeback requester is the side that JUST MOVED, not the side to move,
+// so the button arms exactly in that state. A declined offer must not lock
+// it forever: the server clears its latch on my next move, and so does the
+// flag (my next accepted move re-arms the button).
+let lastMoveWasMine = false;
 
 function resetGameActionButtons() {
   drawOfferDeclined = false;
   challengeDeclined = false;
   gameIsOver = false;
+  lastMoveWasMine = false;
 }
 
 function disableAllGameActions() {
@@ -592,6 +602,13 @@ socket.on('validated', (boardState, turnState, extra) => {
     // Black sees rotated board (180°) — single orientation seam: layout.js
     board = window.ChessLayout.rotateBoard(boardState, my_color);
   is_being_validated = false;
+  // Contract 38 (F2): reached only for an accepted move (rejected candidates
+  // return early). turnState is the NEXT side to move, so the move just
+  // applied was mine iff the turn is NOT mine. Pending promotions flip the
+  // turn only in the SECOND 'validated' (promotion:choose), which carries the
+  // final turnState — both events run the same check, so the flag always ends
+  // up reflecting who made the move that applied.
+  lastMoveWasMine = (turnState != my_color);
   // F3: adopt the server-authoritative lastMove (server coords, same shape as
   // the local one) so EP targets of the opponent's double push are computed.
   if (extra && extra.lastMove) lastMove = extra.lastMove;
@@ -615,6 +632,10 @@ socket.on('validated', (boardState, turnState, extra) => {
   // Redraw the board after move validation
   render_board();
   renderCapturedPieces();
+  // Contract 38 (F2): the turn flip above (re)computes the takeback button —
+  // after MY move it is the side I just moved, so it arms; after the
+  // opponent's move it disarms again.
+  updateTakebackButton();
   
 });
 
@@ -666,18 +687,29 @@ socket.on('draw', (data) => {
   showEndModal('Ничья', document.getElementById('status').innerText);
 });
 
-// Takeback button
+// Takeback button (contract 38 F1 server contract: the REQUESTER is the side
+// that JUST MOVED, not the side to move). Client rule: armed iff the game is
+// live AND it is the OPPONENT's turn (can_move === false) AND the last
+// applied move was mine (lastMoveWasMine). No permanent lock after a decline:
+// the server clears its latch on my next move, so the button re-arms then.
+// The server re-validates all of this anyway.
 const btnTakeback = document.getElementById('btn-takeback');
-let takebackDeclined = false;
+function updateTakebackButton() {
+  if (!btnTakeback) return;
+  btnTakeback.disabled = gameIsOver || !(can_move === false) || !lastMoveWasMine;
+}
+updateTakebackButton();
 if (btnTakeback) {
   btnTakeback.addEventListener('click', () => {
-    if (gameIsOver || takebackDeclined) return;
+    if (gameIsOver) return;
+    if (can_move) return; // my turn — nothing of mine to cancel yet
+    if (!lastMoveWasMine) return;
     socket.emit('takebackRequest', matchId);
-    showToast('Takeback request sent');
   });
 }
 
-// Incoming takeback offer from opponent
+// Incoming takeback offer from opponent (they just moved; the side to move —
+// me — accepts or declines)
 socket.on('takebackOfferReceived', (data) => {
   if (gameIsOver) return;
   const modal = document.getElementById('takebackOfferModal');
@@ -702,7 +734,8 @@ if (btnTakebackDecline) {
   });
 }
 
-// Takeback accepted by opponent → restore board
+// Takeback accepted by opponent → restore board to the pre-move position,
+// turn back with the requester (the side who just moved — me or my opponent).
 socket.on('takebackAccepted', (boardState, turnState) => {
   if (my_color == 0) {
     board = boardState;
@@ -710,6 +743,7 @@ socket.on('takebackAccepted', (boardState, turnState) => {
     // Black sees rotated board (180°) — single orientation seam: layout.js
     board = window.ChessLayout.rotateBoard(boardState, my_color);
   }
+  window.__lastValidatedRaw = boardState.map(r => r.slice());
   if (turnState == my_color) {
     document.getElementById('status').innerText = 'Your turn';
     can_move = true;
@@ -717,18 +751,49 @@ socket.on('takebackAccepted', (boardState, turnState) => {
     document.getElementById('status').innerText = 'Opponent\'s turn';
     can_move = false;
   }
+  // Same derivation as the 'validated' handler: turnState is the next side to
+  // move, so the last move still in history is mine iff the turn is not mine
+  // (requester's page arms; the responder's page disarms).
+  lastMoveWasMine = (turnState != my_color);
+  // The 10 ms loop re-renders the board from `board`, but redraw explicitly so
+  // the restore is visible immediately; strips are recomputed from the
+  // restored board (the undone move's capture, if any, is gone from the strip).
+  draw();
+  render_board();
+  renderCapturedPieces();
+  updateTakebackButton();
 });
 
-// Takeback declined by opponent
+// Takeback declined by opponent: the server sends the Russian message as a
+// takebackError, so no extra toast here — the latch simply stays clear, and
+// the button re-arms whenever I am again the side that just moved.
 socket.on('takebackDeclined', () => {
-  takebackDeclined = true;
-  document.getElementById('btn-takeback').disabled = true;
-  showToast('Takeback declined');
+  updateTakebackButton();
 });
 
-// Takeback error
+// Takeback error (server-side Russian message, e.g. «Возврат хода уже
+// отклонён», «Сейчас ваш ход - отменять нечего»): shown in the status line
+// for ~3 s with an accent color, no canvas shake. The status text then
+// restores to the turn text; the button itself is recomputed by the turn
+// rule (my turn again after my next move → armed again).
 socket.on('takebackError', (msg) => {
-  showToast(msg);
+  if (typeof msg !== 'string' || !msg) return;
+  const status = document.getElementById('status');
+  if (!status) { showToast(msg); return; }
+  if (window.__statusRestorePending) clearTimeout(window.__statusRestorePending);
+  // Snapshot the CURRENT turn text: if a move applies during the 3 s window,
+  // the 'validated' handler rewrites the status — the restore timer must not
+  // overwrite the fresh text with the stale one.
+  const turnText = status.innerText;
+  status.innerText = msg;
+  status.classList.add('status-takeback-error');
+  window.__statusRestorePending = setTimeout(() => {
+    status.classList.remove('status-takeback-error');
+    if (status.innerText === msg && !gameIsOver) {
+      status.innerText = turnText;
+    }
+  }, 3000);
+  updateTakebackButton();
 });
 
 // repetition warning
